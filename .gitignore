@@ -1,0 +1,39 @@
+# Environment & secrets
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# IDE
+.idea/
+*.suo
+*.user
+
+# Large derived data files (regenerate from WSN1.rpt via notebook)
+Backend/data pipeline/WSN1 - report.txt
+Backend/data pipeline/WSN1_temp.txt
+
+# OS
+.DS_Store
+Thumbs.db
+

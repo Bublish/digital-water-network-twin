@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git --version)",
+      "Bash(gh --version)",
+      "Bash(docker --version)",
+      "Bash(pip show:*)",
+      "Bash(python -c \"import epyt; print\\(epyt.__file__\\)\")",
+      "Bash(python simulation/Simulator.py)",
+      "Bash(python -c ':*)",
+      "Bash(gh auth *)",
+      "PowerShell(gh auth status 2>&1)"
+    ]
+  }
+}

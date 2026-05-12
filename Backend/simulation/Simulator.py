@@ -7,14 +7,18 @@ Usage:
         run_id = sim.seed(days=3)
         print(f"Seeded run_id: {run_id}")
 
-    # Run indefinitely in real-time (1 simulated hour = 1 real hour):
+    # Step-by-step interface (driven by SimulationRunner):
     with EPANETSimulator() as sim:
-        sim.run_live()
+        sim_id = sim.start_simulation()
+        sim.rotate_demand_pattern()
+        state  = sim.read_state()
+        sim.apply_pump_commands({"P1": "OPEN"})
+        result = sim.step()
+        sim.stop_simulation()
 """
 
 import shutil
 import tempfile
-import time
 import uuid
 from pathlib import Path
 
@@ -23,6 +27,7 @@ import numpy as np
 from epyt import epanet
 
 from db.SupabaseClient import SupabaseDB
+from simulation.types import StepResult, StepState
 
 
 class EPANETSimulator:
@@ -30,8 +35,8 @@ class EPANETSimulator:
     Runs hydraulic EPS on the WSN1 network and streams results to Supabase.
 
     Two modes:
-      seed(days=3)  — run N days as fast as possible, inserting hourly rows
-      run_live()    — run one simulated hour, insert, sleep 1 real hour, repeat forever
+      seed(days=3)        — run N days as fast as possible, inserting hourly rows
+      start_simulation()  — step-by-step interface driven by SimulationRunner
     """
 
     def __init__(self) -> None:
@@ -43,6 +48,8 @@ class EPANETSimulator:
         self._inp_path.write_bytes(inp_bytes)
         self._network: epanet | None = None
         self._base_demands: list[float] | None = None
+        self._sim_started: bool = False
+        self._current_t_sec: float = 0.0
 
     # ------------------------------------------------------------------
     # Public interface
@@ -94,43 +101,194 @@ class EPANETSimulator:
 
 
 
-    def run_live(self) -> None:
-        """Step the EPS indefinitely, inserting every hydraulic step to Supabase."""
-        hstep = 3600
-        self._network.setTimePatternStep(hstep)   # type: ignore
-        self._network.setTimeHydraulicStep(hstep)  # type: ignore
+    # ------------------------------------------------------------------
+    # Step-by-step interface (replaces run_24_hour_cycle / run_live)
+    # ------------------------------------------------------------------
+
+    def start_simulation(self) -> str:
+        """
+        Configure timesteps, open hydraulic analysis, initialize at t=0.
+        Returns a sim_id (UUID) for tagging results.
+
+        For continuous operation we set simulation duration to 365 days;
+        if the runner is still going past then, a restart is required.
+        """
+        if self._network is None:
+            raise RuntimeError("Network not loaded. Call load() first.")
+        if self._sim_started:
+            raise RuntimeError("Simulation already started. Call stop_simulation() first.")
+
+        hstep = 900  # 15 minutes in seconds
+        self._network.setTimePatternStep(hstep)
+        self._network.setTimeHydraulicStep(hstep)
+        self._network.setTimeReportingStep(hstep)
+        self._network.setTimeSimulationDuration(365 * 24 * 3600)  # 1 year
 
         self._log_control_definitions()
 
-        node_ids   = self._network.getNodeNameID()   # type: ignore
-        link_ids   = self._network.getLinkNameID()   # type: ignore
-        pump_names = self._network.getLinkPumpNameID()  # type: ignore
+        self._network.openHydraulicAnalysis()
+        self._network.initializeHydraulicAnalysis(0)
+        self._current_t_sec = 0.0
 
-        while True:
-            run_id = str(uuid.uuid4())
-            print(f"[run_live] Starting cycle  run_id={run_id}")
-            self._network.openHydraulicAnalysis()   # type: ignore
-            self._network.initializeHydraulicAnalysis(0)  # type: ignore
-            prev_pump_states = None
-            try:
-                while True:
-                    t_sec = self._network.runHydraulicAnalysis()  # type: ignore
-                    t_hr  = t_sec / 3600.0
+        self._sim_started = True
+        sim_id = str(uuid.uuid4())
+        print(f"[start_simulation] sim_id={sim_id}")
+        return sim_id
 
-                    curr_pump_states = self._network.getLinkPumpState()  # type: ignore
-                    if prev_pump_states is not None:
-                        self._log_pump_state_changes(t_hr, curr_pump_states, prev_pump_states, pump_names)
-                    prev_pump_states = curr_pump_states
+    def stop_simulation(self) -> None:
+        """
+        Close hydraulic analysis. Safe to call when not started (no-op).
+        """
+        if not self._sim_started:
+            return
+        try:
+            self._network.closeHydraulicAnalysis()
+        finally:
+            self._sim_started = False
 
-                    self._insert_snapshot(self._network, run_id, t_hr, node_ids, link_ids)
+    def rotate_demand_pattern(self) -> None:
+        """
+        Install a fresh 96-step demand multiplier pattern and re-randomize
+        per-node base demands. Called by the scheduler at start AND every
+        96 steps (every simulated 24h).
 
-                    self._randomizeDemand()
+        The pattern multipliers are lognormal around 1.0 with sigma=0.10,
+        which is a system-wide diurnal jitter applied on top of the
+        per-node lognormal base-demand randomization.
+        """
+        if self._network is None:
+            raise RuntimeError("Network not loaded.")
 
-                    tstep = self._network.nextHydraulicAnalysisStep()  # type: ignore
-                    if tstep <= 0:
-                        break
-            finally:
-                self._network.closeHydraulicAnalysis()  # type: ignore
+        # 96 steps × 15 min = 24 h
+        sigma = 0.10
+        mu = -0.5 * sigma ** 2
+        multipliers = np.random.lognormal(mean=mu, sigma=sigma, size=96).tolist()
+        self._network.addPattern("DMA_AUTO", multipliers)
+
+        # Re-randomize the per-node base demands too.
+        self._randomizeDemand()
+
+    def read_state(self) -> StepState:
+        """
+        Snapshot current sim time + tank levels + pump statuses (no I/O).
+        Used by the scheduler to build the ML predict request before a step.
+
+        Tank levels are computed as (hydraulic head − tank elevation), which
+        gives the live water-surface height above the tank floor. Reading
+        getNodeTankInitialLevel during a run returns the initial level, not
+        the current one — hence the head-minus-elevation derivation.
+        """
+        if self._network is None or not self._sim_started:
+            raise RuntimeError("Simulation not started.")
+
+        node_ids = self._network.getNodeNameID()
+        tank_ids = self._network.getNodeTankNameID()
+        node_id_to_idx = {nid: i for i, nid in enumerate(node_ids)}
+
+        heads      = self._network.getNodeHydraulicHead()
+        elevations = self._network.getNodeElevations()
+
+        tank_levels: dict[str, float] = {}
+        for tid in tank_ids:
+            i = node_id_to_idx.get(tid)
+            if i is None:
+                continue
+            tank_levels[tid] = float(heads[i]) - float(elevations[i])
+
+        # Use getLinkStatus (commanded status, synchronous with setLinkStatus)
+        # rather than getLinkPumpState (last-solved operational state).
+        pump_ids = self._network.getLinkPumpNameID()
+        pump_states: dict[str, str] = {}
+        for pid in pump_ids:
+            link_idx = self._network.getLinkIndex(pid)
+            status = int(self._network.getLinkStatus(link_idx))
+            pump_states[pid] = "OPEN" if status > 0 else "CLOSED"
+
+        return StepState(
+            sim_time_sec=float(self._current_t_sec),
+            tank_levels=tank_levels,
+            pump_states=pump_states,
+        )
+
+    def apply_pump_commands(self, commands: dict[str, str]) -> None:
+        """
+        Apply pump status commands via setLinkStatus.
+
+        commands: {pump_id: "OPEN" | "CLOSED"}.
+
+        Pumps absent from commands are left untouched. Called AFTER override
+        resolution, BEFORE step().
+        """
+        if self._network is None or not self._sim_started:
+            raise RuntimeError("Simulation not started.")
+
+        pump_ids = self._network.getLinkPumpNameID()
+        pump_name_to_link_index = {
+            pid: self._network.getLinkIndex(pid) for pid in pump_ids
+        }
+        for pump_id, status in commands.items():
+            if pump_id not in pump_name_to_link_index:
+                continue
+            link_index = pump_name_to_link_index[pump_id]
+            value = 1 if status == "OPEN" else 0
+            self._network.setLinkStatus(link_index, value)
+
+    def step(self) -> StepResult:
+        """
+        Run one hydraulic solve and advance to the next step. Returns all
+        per-node and per-link values for the just-computed timestep.
+
+        Raises StopIteration if EPANET reports tstep <= 0 (sim duration
+        reached — shouldn't happen for ~1 year in continuous mode).
+        """
+        if self._network is None or not self._sim_started:
+            raise RuntimeError("Simulation not started.")
+
+        t_sec = self._network.runHydraulicAnalysis()
+        self._current_t_sec = float(t_sec)
+
+        node_ids = self._network.getNodeNameID()
+        link_ids = self._network.getLinkNameID()
+        tank_ids = self._network.getNodeTankNameID()
+        pump_ids = self._network.getLinkPumpNameID()
+        node_id_to_idx = {nid: i for i, nid in enumerate(node_ids)}
+
+        pressures      = self._network.getNodePressure()
+        heads          = self._network.getNodeHydraulicHead()
+        demands        = self._network.getNodeActualDemand()
+        elevations     = self._network.getNodeElevations()
+        flows          = self._network.getLinkFlows()
+        velocities     = self._network.getLinkVelocity()
+        headlosses     = self._network.getLinkHeadloss()
+        pump_state_raw = self._network.getLinkPumpState()
+
+        tank_levels: dict[str, float] = {}
+        for tid in tank_ids:
+            i = node_id_to_idx.get(tid)
+            if i is None:
+                continue
+            tank_levels[tid] = float(heads[i]) - float(elevations[i])
+
+        result = StepResult(
+            sim_time_sec=float(t_sec),
+            pressures={nid: float(pressures[i])   for i, nid in enumerate(node_ids)},
+            heads={nid: float(heads[i])           for i, nid in enumerate(node_ids)},
+            demands={nid: float(demands[i])       for i, nid in enumerate(node_ids)},
+            flows={lid: float(flows[i])           for i, lid in enumerate(link_ids)},
+            velocities={lid: float(velocities[i]) for i, lid in enumerate(link_ids)},
+            headlosses={lid: float(headlosses[i]) for i, lid in enumerate(link_ids)},
+            pump_states={
+                pid: ("OPEN" if int(pump_state_raw[i]) > 0 else "CLOSED")
+                for i, pid in enumerate(pump_ids)
+            },
+            tank_levels=tank_levels,
+        )
+
+        tstep = self._network.nextHydraulicAnalysisStep()
+        if tstep <= 0:
+            raise StopIteration("EPANET reached end of simulation duration.")
+
+        return result
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -186,56 +344,34 @@ class EPANETSimulator:
 
         self._network.setNodeBaseDemands(new_demands)  # type: ignore
 
-    def _insert_snapshot(self, network, run_id: str, t_hr: float, node_ids, link_ids) -> None:
-        """Collect hydraulic results for the current timestep and bulk-insert to Supabase."""
-        pressures  = network.getNodePressure()
-        heads      = network.getNodeHydraulicHead()
-        demands    = network.getNodeActualDemand()
-        flows      = network.getLinkFlow()
-        velocities = network.getLinkVelocity()
-        headlosses = network.getLinkHeadloss()
-
-        node_rows = [
-            {
-                "run_id":       run_id,
-                "sim_hour":     t_hr,
-                "node_id":      nid,
-                "pressure_psi": float(pressures[i]),
-                "head_ft":      float(heads[i]),
-                "demand_gpm":   float(demands[i]),
-            }
-            for i, nid in enumerate(node_ids)
-        ]
-        link_rows = [
-            {
-                "run_id":               run_id,
-                "sim_hour":             t_hr,
-                "link_id":              lid,
-                "flow_gpm":             float(flows[i]),
-                "velocity_fps":         float(velocities[i]),
-                "headloss_ft_per_kft":  float(headlosses[i]),
-            }
-            for i, lid in enumerate(link_ids)
-        ]
-
-        self._db.insert_live_node_results(node_rows)
-        self._db.insert_live_link_results(link_rows)
-
     def _log_control_definitions(self) -> None:
-        controls = self._network.getControls()   # type: ignore
-        rules    = self._network.getRules()      # type: ignore
-        print("[init] Simple controls:")
-        for c in controls:  # type: ignore
-            print(f"  {c.Control}")  # type: ignore
-        print("[init] Rule-based controls:")
-        for r in rules:  # type: ignore
-            print(f"  {r.Rule}")  # type: ignore
-
-    def _log_pump_state_changes(self, t_hr: float, curr, prev, pump_names) -> None:
-        for i, (c, p) in enumerate(zip(curr, prev)):
-            if c != p:
-                name = pump_names[i] if i < len(pump_names) else str(i)
-                print(f"[control] t={t_hr:.4f}h  Pump {name}  {p} → {c}")
+        """Best-effort dump of simple controls + rules. Tolerant of epyt API drift."""
+        try:
+            controls = self._network.getControls()   # type: ignore
+            print("[init] Simple controls:")
+            if isinstance(controls, dict):
+                for k, v in controls.items():
+                    print(f"  {k}: {getattr(v, 'Control', v)}")
+            elif isinstance(controls, (list, tuple)):
+                for c in controls:
+                    print(f"  {getattr(c, 'Control', c)}")
+            else:
+                print(f"  (count={controls})")
+        except Exception as exc:
+            print(f"[init] WARN: could not enumerate controls: {exc!r}")
+        try:
+            rules = self._network.getRules()      # type: ignore
+            print("[init] Rule-based controls:")
+            if isinstance(rules, dict):
+                for k, v in rules.items():
+                    print(f"  {k}: {getattr(v, 'Rule', v)}")
+            elif isinstance(rules, (list, tuple)):
+                for r in rules:
+                    print(f"  {getattr(r, 'Rule', r)}")
+            else:
+                print(f"  (count={rules})")
+        except Exception as exc:
+            print(f"[init] WARN: could not enumerate rules: {exc!r}")
 
     # ------------------------------------------------------------------
     # Context manager

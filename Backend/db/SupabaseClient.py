@@ -15,12 +15,11 @@ class SupabaseDB:
     Usage:
         db = SupabaseDB()
         inp_bytes = db.download_network()
-        db.save_tank_state({"T1": 12.5, "T2": 8.3})
-        state = db.load_tank_state()
         db.insert_seed_node_results([{"run_id": ..., "sim_hour": 1.0, "node_id": "J1", ...}])
         db.insert_seed_link_results([{"run_id": ..., "sim_hour": 1.0, "link_id": "P1", ...}])
         db.insert_live_node_results([{"run_id": ..., "sim_hour": 1.0, "node_id": "J1", ...}])
         db.insert_live_link_results([{"run_id": ..., "sim_hour": 1.0, "link_id": "P1", ...}])
+        db.insert_control_decision([{"sim_id": ..., "pump_id": "P1", "ml_commanded": "OPEN", ...}])
     """
 
     _instance: "SupabaseDB | None" = None
@@ -55,25 +54,14 @@ class SupabaseDB:
                 f"'{NETWORK_FILE}' not found in Supabase '{NETWORK_BUCKET}' bucket"
             )
         return data
-
-    # ------------------------------------------------------------------
-    # Network state (tank levels)
-    # ------------------------------------------------------------------
-
-    def save_tank_state(self, state: dict[str, float]) -> None:
-        """Upsert tank water levels (ft above tank floor) to the network_state table."""
-        rows = [
-            {"tank_id": tid, "level_ft": lvl, "updated_at": datetime.now(UTC).isoformat()}
-            for tid, lvl in state.items()
-        ]
-        self._client.table("network_state").upsert(rows).execute()
-
-    def load_tank_state(self) -> dict[str, float] | None:
-        """Return the latest saved tank levels, or None if no state has been saved yet."""
-        response = self._client.table("network_state").select("tank_id, level_ft").execute()
-        if not response.data:
-            return None
-        return {row["tank_id"]: row["level_ft"] for row in response.data}
+    
+    def save_network(self, inp_bytes: bytes, filename: str = NETWORK_FILE) -> None:
+        """Upload (or overwrite) an EPANET .inp file in Supabase storage."""
+        self._client.storage.from_(NETWORK_BUCKET).upload(
+            path=filename,
+            file=inp_bytes,
+            file_options={"upsert": "true"},
+        )
 
     # ------------------------------------------------------------------
     # Simulation results
@@ -94,3 +82,7 @@ class SupabaseDB:
     def insert_live_link_results(self, rows: list[dict]) -> None:
         """Insert real-time link snapshot rows into live_link_results."""
         self._client.table("live_link_results").insert(rows).execute()
+
+    def insert_control_decision(self, rows: list[dict]) -> None:
+        """Insert one row per pump per step into control_decisions (XAI audit table)."""
+        self._client.table("control_decisions").insert(rows).execute()

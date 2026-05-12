@@ -9,7 +9,8 @@
       "Bash(python simulation/Simulator.py)",
       "Bash(python -c ':*)",
       "Bash(gh auth *)",
-      "PowerShell(gh auth status 2>&1)"
+      "PowerShell(gh auth status 2>&1)",
+      "Bash(git checkout *)"
     ]
   }
 }

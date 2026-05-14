@@ -37,6 +37,13 @@ def test_app():
         pump_states={"P1": "OPEN", "P2": "OPEN"},
         tank_levels={"T1": 25.5, "T2": 40.5},
     )
+    fake_sim.compute_network_info.return_value = {
+        "junction_count": 130, "tank_count": 2, "reservoir_count": 1,
+        "pump_count": 2, "valve_count": 0, "pipe_count": 168,
+        "total_pipe_length_mi": 23.3, "total_demand_gpm": 906.0,
+        "total_demand_mgd": 1.30, "pattern_steps": 96, "pattern_period_min": 15,
+    }
+    fake_sim.render_plot_png.return_value = b"\x89PNG\r\n\x1a\n" + b"\x00" * 2000
     fake_db = MagicMock()
 
     @asynccontextmanager
@@ -49,6 +56,8 @@ def test_app():
             sim=fake_sim, db=fake_db, http_client=http_client,
             ml_url="http://testserver/ml/predict",
         )
+        app.state.network_info = fake_sim.compute_network_info()
+        app.state.network_plot_png = fake_sim.render_plot_png()
         try:
             yield
         finally:
@@ -59,6 +68,8 @@ def test_app():
     app = FastAPI(lifespan=lifespan)
     app.include_router(sim_router)
     app.include_router(ml_router)
+    from api.network_routes import router as network_router
+    app.include_router(network_router)
     app.state._fake_sim = fake_sim
     app.state._fake_db = fake_db
     return app
@@ -109,3 +120,21 @@ def test_stop_when_not_running_returns_409(test_app):
     with TestClient(test_app) as client:
         r = client.post("/sim/stop")
         assert r.status_code == 409
+
+
+def test_get_network_info(test_app):
+    with TestClient(test_app) as client:
+        r = client.get("/network/info")
+        assert r.status_code == 200
+        body = r.json()
+        assert body["pump_count"] == 2
+        assert body["tank_count"] == 2
+        assert body["junction_count"] == 130
+
+
+def test_get_network_plot_png(test_app):
+    with TestClient(test_app) as client:
+        r = client.get("/network/plot.png")
+        assert r.status_code == 200
+        assert r.headers["content-type"] == "image/png"
+        assert r.content.startswith(b"\x89PNG")

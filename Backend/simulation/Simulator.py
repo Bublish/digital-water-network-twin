@@ -229,6 +229,8 @@ class EPANETSimulator:
 
         # getLinkLength returns lengths for ALL links (pipes, pumps, valves) in feet.
         # Pumps and valves have length 0, so summing all is fine.
+        # NOTE: Assumes US units (feet/GPM) — true for WSN1. Non-US .inp files would
+        # need a flow-units check via getFlowUnits() before using these field names.
         total_length_ft = float(sum(n.getLinkLength()))
 
         # base demands across all junctions (category 1)
@@ -241,7 +243,8 @@ class EPANETSimulator:
         try:
             pattern_lengths = n.getPatternLengths()
             pattern_steps = int(pattern_lengths[0]) if len(pattern_lengths) else 96
-        except Exception:
+        except (AttributeError, IndexError, TypeError) as exc:
+            print(f"[network_info] WARN: getPatternLengths failed ({exc!r}); defaulting pattern_steps=96")
             pattern_steps = 96
 
         return {

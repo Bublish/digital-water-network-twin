@@ -94,9 +94,9 @@ def test_compute_network_info_returns_expected_counts():
     assert info["pump_count"] == 2
     assert info["tank_count"] == 2
     assert info["reservoir_count"] == 1
-    assert info["junction_count"] > 100
-    assert info["pipe_count"] > 0
-    assert info["total_pipe_length_mi"] > 0
+    assert 120 < info["junction_count"] < 140      # WSN1 has ~130 junctions
+    assert 100 < info["pipe_count"] < 250          # WSN1 has ~168 pipes; bound generously
+    assert 20.0 < info["total_pipe_length_mi"] < 30.0   # WSN1: 23.3 miles
     assert info["total_demand_gpm"] > 0
     assert info["total_demand_mgd"] == pytest.approx(
         info["total_demand_gpm"] * 1440 / 1_000_000, rel=1e-6

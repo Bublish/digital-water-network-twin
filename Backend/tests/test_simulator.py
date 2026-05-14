@@ -103,3 +103,14 @@ def test_compute_network_info_returns_expected_counts():
     )
     assert info["pattern_steps"] > 0
     assert info["pattern_period_min"] > 0
+
+
+def test_render_plot_png_returns_png_bytes():
+    from simulation.Simulator import EPANETSimulator
+
+    with EPANETSimulator() as sim:
+        png = sim.render_plot_png()
+
+    # PNG file signature: 89 50 4E 47 0D 0A 1A 0A
+    assert png.startswith(b"\x89PNG\r\n\x1a\n")
+    assert len(png) > 1000  # not an empty/header-only file

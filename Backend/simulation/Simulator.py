@@ -24,6 +24,11 @@ from pathlib import Path
 
 import numpy as np
 
+import io
+import matplotlib
+matplotlib.use("Agg")  # headless backend; must be set before pyplot import
+import matplotlib.pyplot as plt
+
 from epyt import epanet
 
 from db.SupabaseClient import SupabaseDB
@@ -260,6 +265,28 @@ class EPANETSimulator:
             "pattern_steps":        pattern_steps,
             "pattern_period_min":   pattern_step_sec // 60,
         }
+
+    def render_plot_png(self) -> bytes:
+        """
+        Render the network using epyt's .plot() and return PNG bytes.
+        Headless: uses matplotlib Agg backend. Safe to call once at startup
+        and cache; the network topology is static.
+        """
+        if self._network is None:
+            raise RuntimeError("Network not loaded. Call load() first.")
+
+        # epyt's plot() returns a Figure (and may or may not show it depending on
+        # version). With Agg backend selected, it cannot pop a window.
+        fig = self._network.plot()
+        if fig is None:
+            # Some epyt versions plot to the current pyplot figure rather than
+            # returning one. Grab it explicitly.
+            fig = plt.gcf()
+
+        buf = io.BytesIO()
+        fig.savefig(buf, format="png", dpi=120, bbox_inches="tight")
+        plt.close(fig)
+        return buf.getvalue()
 
     def apply_pump_commands(self, commands: dict[str, str]) -> None:
         """

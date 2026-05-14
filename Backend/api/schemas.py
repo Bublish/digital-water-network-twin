@@ -63,3 +63,17 @@ class PredictResponse(BaseModel):
     commands:    dict[str, str]            # pump_id -> "OPEN"|"CLOSED"
     model_id:    str
     explanation: dict | None = None
+
+
+class NetworkInfo(BaseModel):
+    junction_count:        int
+    tank_count:            int
+    reservoir_count:       int
+    pump_count:            int
+    valve_count:           int
+    pipe_count:            int
+    total_pipe_length_mi:  float
+    total_demand_gpm:      float
+    total_demand_mgd:      float
+    pattern_steps:         int
+    pattern_period_min:    int

@@ -82,3 +82,24 @@ def test_step_advances_sim_time_and_returns_step_result(sim):
     assert len(result.pressures) > 0
     assert len(result.flows) > 0
     sim.stop_simulation()
+
+
+def test_compute_network_info_returns_expected_counts():
+    """Hits the real WSN1 network — requires Supabase + WSN1.inp upload."""
+    from simulation.Simulator import EPANETSimulator
+
+    with EPANETSimulator() as sim:
+        info = sim.compute_network_info()
+
+    assert info["pump_count"] == 2
+    assert info["tank_count"] == 2
+    assert info["reservoir_count"] == 1
+    assert info["junction_count"] > 100
+    assert info["pipe_count"] > 0
+    assert info["total_pipe_length_mi"] > 0
+    assert info["total_demand_gpm"] > 0
+    assert info["total_demand_mgd"] == pytest.approx(
+        info["total_demand_gpm"] * 1440 / 1_000_000, rel=1e-6
+    )
+    assert info["pattern_steps"] > 0
+    assert info["pattern_period_min"] > 0

@@ -210,6 +210,54 @@ class EPANETSimulator:
             pump_states=pump_states,
         )
 
+    def compute_network_info(self) -> dict:
+        """
+        Static topology stats. Computed once per network load; safe to call
+        before start_simulation(). Returns plain dict so the api layer can
+        wrap it in a Pydantic NetworkInfo without creating a layering dep.
+        """
+        if self._network is None:
+            raise RuntimeError("Network not loaded. Call load() first.")
+
+        n = self._network
+        junction_ids  = n.getNodeJunctionNameID()
+        tank_ids      = n.getNodeTankNameID()
+        reservoir_ids = n.getNodeReservoirNameID()
+        pump_ids      = n.getLinkPumpNameID()
+        valve_ids     = n.getLinkValveNameID()
+        pipe_ids      = n.getLinkPipeNameID()
+
+        # getLinkLength returns lengths for ALL links (pipes, pumps, valves) in feet.
+        # Pumps and valves have length 0, so summing all is fine.
+        total_length_ft = float(sum(n.getLinkLength()))
+
+        # base demands across all junctions (category 1)
+        base_demands = list(n.getNodeBaseDemands()[1])
+        total_demand_gpm = float(sum(base_demands))
+
+        pattern_step_sec = int(n.getTimePatternStep())
+        # Use the first pattern's length to derive pattern_steps. If no pattern,
+        # default to 96 (24h at 15min).
+        try:
+            pattern_lengths = n.getPatternLengths()
+            pattern_steps = int(pattern_lengths[0]) if len(pattern_lengths) else 96
+        except Exception:
+            pattern_steps = 96
+
+        return {
+            "junction_count":       len(junction_ids),
+            "tank_count":           len(tank_ids),
+            "reservoir_count":      len(reservoir_ids),
+            "pump_count":           len(pump_ids),
+            "valve_count":          len(valve_ids),
+            "pipe_count":           len(pipe_ids),
+            "total_pipe_length_mi": total_length_ft / 5280.0,
+            "total_demand_gpm":     total_demand_gpm,
+            "total_demand_mgd":     total_demand_gpm * 1440.0 / 1_000_000.0,
+            "pattern_steps":        pattern_steps,
+            "pattern_period_min":   pattern_step_sec // 60,
+        }
+
     def apply_pump_commands(self, commands: dict[str, str]) -> None:
         """
         Apply pump status commands via setLinkStatus.

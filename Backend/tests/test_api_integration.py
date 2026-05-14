@@ -2,6 +2,7 @@
 End-to-end test using FastAPI's TestClient. Mocks Supabase + Simulator
 to avoid network dependencies; uses the real stub ML route.
 """
+import json
 import time
 from contextlib import asynccontextmanager
 from unittest.mock import MagicMock
@@ -10,6 +11,7 @@ import httpx
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from httpx import ASGITransport
 
 
 @pytest.fixture
@@ -138,3 +140,106 @@ def test_get_network_plot_png(test_app):
         assert r.status_code == 200
         assert r.headers["content-type"] == "image/png"
         assert r.content.startswith(b"\x89PNG")
+
+
+async def _read_first_sse_event(app, path: str = "/sim/stream", timeout: float = 5.0) -> dict:
+    """
+    Drive the ASGI app directly to read the first SSE 'data:' event.
+
+    httpx's ASGITransport buffers the entire response body before returning,
+    which deadlocks on long-lived streaming endpoints. To test SSE we have
+    to talk ASGI directly and stop after the first body chunk.
+    """
+    import asyncio as _asyncio
+
+    scope = {
+        "type": "http",
+        "asgi": {"version": "3.0", "spec_version": "2.3"},
+        "http_version": "1.1",
+        "method": "GET",
+        "scheme": "http",
+        "path": path,
+        "raw_path": path.encode(),
+        "query_string": b"",
+        "headers": [(b"host", b"test"), (b"accept", b"text/event-stream")],
+        "client": ("127.0.0.1", 12345),
+        "server": ("test", 80),
+        "state": {},
+    }
+
+    body_chunks: list[bytes] = []
+    status_holder: dict = {}
+    headers_holder: dict = {}
+    first_body_received = _asyncio.Event()
+    disconnect_now = _asyncio.Event()
+
+    async def receive():
+        # First request body, then block until we want to disconnect.
+        if not getattr(receive, "_sent", False):
+            receive._sent = True
+            return {"type": "http.request", "body": b"", "more_body": False}
+        await disconnect_now.wait()
+        return {"type": "http.disconnect"}
+
+    async def send(message):
+        if message["type"] == "http.response.start":
+            status_holder["code"] = message["status"]
+            headers_holder["headers"] = dict(message.get("headers", []))
+        elif message["type"] == "http.response.body":
+            chunk = message.get("body", b"")
+            if chunk:
+                body_chunks.append(chunk)
+                first_body_received.set()
+
+    app_task = _asyncio.create_task(app(scope, receive, send))
+    try:
+        await _asyncio.wait_for(first_body_received.wait(), timeout=timeout)
+    finally:
+        disconnect_now.set()
+        try:
+            await _asyncio.wait_for(app_task, timeout=2.0)
+        except _asyncio.TimeoutError:
+            app_task.cancel()
+            try:
+                await app_task
+            except (BaseException,):
+                pass
+
+    assert status_holder.get("code") == 200, f"Expected 200, got {status_holder.get('code')}"
+    ct = headers_holder["headers"].get(b"content-type", b"").decode()
+    assert ct.startswith("text/event-stream"), f"Unexpected content-type: {ct!r}"
+
+    raw = b"".join(body_chunks).decode()
+    for line in raw.splitlines():
+        if line.startswith("data:"):
+            return json.loads(line[len("data:"):].strip())
+    raise AssertionError(f"No data: line in SSE body: {raw!r}")
+
+
+@pytest.mark.asyncio
+async def test_sim_stream_pushes_event_after_tick(test_app):
+    """Open SSE stream after starting the sim; expect a JSON snapshot event."""
+    async with test_app.router.lifespan_context(test_app):
+        # Start the sim via the ASGI app so the runner ticks
+        async with httpx.AsyncClient(
+            transport=ASGITransport(app=test_app), base_url="http://test"
+        ) as client:
+            r = await client.post("/sim/start", json={"time_scale": 10000})
+            assert r.status_code == 200
+
+        event = await _read_first_sse_event(test_app)
+        assert event["status"] in ("RUNNING", "STOPPED")
+        assert "tank_levels" in event
+
+        async with httpx.AsyncClient(
+            transport=ASGITransport(app=test_app), base_url="http://test"
+        ) as client:
+            await client.post("/sim/stop")
+
+
+@pytest.mark.asyncio
+async def test_sim_stream_sends_initial_event_when_not_started(test_app):
+    """On connect, server immediately sends one snapshot — even if sim never started."""
+    async with test_app.router.lifespan_context(test_app):
+        event = await _read_first_sse_event(test_app)
+        assert event["status"] == "NOT_STARTED"

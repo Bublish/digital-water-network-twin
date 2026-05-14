@@ -137,3 +137,78 @@ async def test_tick_falls_back_when_ml_fails(mock_sim, mock_db):
     # Check the control_decision row records the fallback model_id
     call_rows = mock_db.insert_control_decision.call_args[0][0]
     assert call_rows[0]["model_id"] == "stub-v0+fallback"
+
+
+@pytest.mark.asyncio
+async def test_subscribe_receives_state_after_tick(mock_sim, mock_db):
+    """A subscriber queue should receive the cached state dict each tick."""
+    from scheduler.SimulationRunner import SimulationRunner
+
+    http = AsyncMock()
+    http.post.return_value = MagicMock(
+        json=lambda: {"commands": {"P1": "CLOSED"}, "model_id": "stub-v0"},
+        raise_for_status=lambda: None,
+    )
+    runner = SimulationRunner(sim=mock_sim, db=mock_db, http_client=http)
+    q: asyncio.Queue = asyncio.Queue(maxsize=8)
+    runner.subscribe(q)
+
+    await runner.start(time_scale=10000)
+    try:
+        event = await asyncio.wait_for(q.get(), timeout=2.0)
+    finally:
+        await runner.stop()
+        runner.unsubscribe(q)
+
+    assert event["status"] == "RUNNING"
+    assert "tank_levels" in event
+    assert "pump_states" in event
+
+
+@pytest.mark.asyncio
+async def test_unsubscribe_stops_receiving(mock_sim, mock_db):
+    from scheduler.SimulationRunner import SimulationRunner
+
+    http = AsyncMock()
+    http.post.return_value = MagicMock(
+        json=lambda: {"commands": {"P1": "CLOSED"}, "model_id": "stub-v0"},
+        raise_for_status=lambda: None,
+    )
+    runner = SimulationRunner(sim=mock_sim, db=mock_db, http_client=http)
+    q: asyncio.Queue = asyncio.Queue(maxsize=8)
+    runner.subscribe(q)
+    runner.unsubscribe(q)
+
+    await runner.start(time_scale=10000)
+    try:
+        await asyncio.sleep(0.3)
+    finally:
+        await runner.stop()
+
+    assert q.empty()
+
+
+@pytest.mark.asyncio
+async def test_broadcast_drops_for_full_queue(mock_sim, mock_db):
+    """A queue that's already full must not block the tick loop."""
+    from scheduler.SimulationRunner import SimulationRunner
+
+    http = AsyncMock()
+    http.post.return_value = MagicMock(
+        json=lambda: {"commands": {"P1": "CLOSED"}, "model_id": "stub-v0"},
+        raise_for_status=lambda: None,
+    )
+    runner = SimulationRunner(sim=mock_sim, db=mock_db, http_client=http)
+    q: asyncio.Queue = asyncio.Queue(maxsize=1)
+    q.put_nowait({"prefilled": True})
+    runner.subscribe(q)
+
+    await runner.start(time_scale=10000)
+    try:
+        await asyncio.sleep(0.3)
+    finally:
+        await runner.stop()
+        runner.unsubscribe(q)
+
+    # Loop kept running and didn't crash; queue still holds only the prefilled item
+    assert q.qsize() == 1

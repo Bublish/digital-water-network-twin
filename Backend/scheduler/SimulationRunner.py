@@ -56,6 +56,7 @@ class SimulationRunner:
         self._last_ml_commands: dict[str, str] | None = None
         self._hydraulic_failures: int = 0
         self._last_sim_hr: float = 0.0
+        self._subscribers: set[asyncio.Queue] = set()
 
     # ---------------- public accessors ----------------
 
@@ -78,6 +79,22 @@ class SimulationRunner:
         """
         self._pump_modes[pump_id] = mode
         return dict(self._pump_modes)
+
+    def subscribe(self, q: asyncio.Queue) -> None:
+        """Register a queue to receive cached_state dicts after each tick."""
+        self._subscribers.add(q)
+
+    def unsubscribe(self, q: asyncio.Queue) -> None:
+        """Remove a queue from the broadcast set. Safe if not registered."""
+        self._subscribers.discard(q)
+
+    def _broadcast(self, state: dict) -> None:
+        """Push state to every subscriber. Drop for slow consumers (no blocking)."""
+        for q in list(self._subscribers):
+            try:
+                q.put_nowait(state)
+            except asyncio.QueueFull:
+                pass
 
     def _resolve_overrides(self, ml_commands: dict[str, str]) -> dict[str, str]:
         """HAND_OPEN/HAND_CLOSED win over the ML command; AUTO uses ML."""
@@ -184,6 +201,7 @@ class SimulationRunner:
 
             # 7. Cache state for GET /sim/state
             self._cached_state = self._build_cached_state(result)
+            self._broadcast(self._cached_state)
             self._last_sim_hr = result.sim_time_sec / 3600.0
             self._step_idx += 1
 

@@ -17,17 +17,13 @@ Usage:
         sim.stop_simulation()
 """
 
+import io
 import shutil
 import tempfile
 import uuid
 from pathlib import Path
 
 import numpy as np
-
-import io
-import matplotlib
-matplotlib.use("Agg")  # headless backend; must be set before pyplot import
-import matplotlib.pyplot as plt
 
 from epyt import epanet
 
@@ -267,20 +263,17 @@ class EPANETSimulator:
         }
 
     def render_plot_png(self) -> bytes:
-        """
-        Render the network using epyt's .plot() and return PNG bytes.
-        Headless: uses matplotlib Agg backend. Safe to call once at startup
-        and cache; the network topology is static.
-        """
+        """Render the network via epyt and return PNG bytes (headless)."""
         if self._network is None:
             raise RuntimeError("Network not loaded. Call load() first.")
 
-        # epyt's plot() returns a Figure (and may or may not show it depending on
-        # version). With Agg backend selected, it cannot pop a window.
+        import matplotlib
+        matplotlib.use("Agg", force=False)  # no-op if a backend is already set
+        import matplotlib.pyplot as plt
+
         fig = self._network.plot()
         if fig is None:
-            # Some epyt versions plot to the current pyplot figure rather than
-            # returning one. Grab it explicitly.
+            # epyt versions vary: some return the Figure, some plot to gcf()
             fig = plt.gcf()
 
         buf = io.BytesIO()

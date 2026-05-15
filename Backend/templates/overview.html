@@ -31,9 +31,15 @@
       <h3>Tanks</h3>
       <ul id="tank-list" class="data-list">
         {% for tid, level in initial_sim_state.tank_levels.items() %}
-          <li data-tank-id="{{ tid }}">
-            <span class="row-id">{{ tid }}</span>
-            <span class="tank-level">{{ "%.1f"|format(level) }}</span>&nbsp;ft
+          {% set tank = network_info.tanks.get(tid) %}
+          <li data-tank-id="{{ tid }}"
+              data-tank-min="{{ tank.min_level_ft if tank else 0 }}"
+              data-tank-max="{{ tank.max_level_ft if tank else 1 }}">
+            <div class="tank-row-text">
+              <span class="row-id">{{ tid }}</span>
+              <span class="tank-level">{{ "%.1f"|format(level) }}</span>&nbsp;/&nbsp;<span class="tank-max">{{ "%.0f"|format(tank.max_level_ft if tank else 0) }}</span>&nbsp;ft
+            </div>
+            <div class="tank-bar"><div class="tank-fill" style="width: 0%"></div></div>
           </li>
         {% endfor %}
       </ul>

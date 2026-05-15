@@ -189,6 +189,38 @@ async def test_unsubscribe_stops_receiving(mock_sim, mock_db):
 
 
 @pytest.mark.asyncio
+async def test_stop_broadcasts_final_state(mock_sim, mock_db):
+    """stop() should push a final state event with status=STOPPED.
+
+    Without this broadcast the frontend's SSE never learns the sim stopped,
+    so it keeps showing RUNNING and the user's next /sim/stop click 409s.
+    """
+    from scheduler.SimulationRunner import SimulationRunner
+
+    http = AsyncMock()
+    http.post.return_value = MagicMock(
+        json=lambda: {"commands": {"P1": "CLOSED"}, "model_id": "stub-v0"},
+        raise_for_status=lambda: None,
+    )
+    runner = SimulationRunner(sim=mock_sim, db=mock_db, http_client=http)
+    q: asyncio.Queue = asyncio.Queue(maxsize=8)
+    runner.subscribe(q)
+
+    await runner.start(time_scale=10000)
+    # Drain any tick events that piled up while the sim was running so we
+    # can isolate the post-stop broadcast.
+    await asyncio.sleep(0.1)
+    while not q.empty():
+        q.get_nowait()
+
+    await runner.stop()
+    event = await asyncio.wait_for(q.get(), timeout=2.0)
+
+    assert event["status"] == "STOPPED"
+    runner.unsubscribe(q)
+
+
+@pytest.mark.asyncio
 async def test_broadcast_drops_for_full_queue(mock_sim, mock_db):
     """A queue that's already full must not block the tick loop."""
     from scheduler.SimulationRunner import SimulationRunner

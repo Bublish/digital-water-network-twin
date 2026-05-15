@@ -248,6 +248,21 @@ class EPANETSimulator:
             print(f"[network_info] WARN: getPatternLengths failed ({exc!r}); defaulting pattern_steps=96")
             pattern_steps = 96
 
+        tanks_info: dict[str, dict] = {}
+        try:
+            tank_min = n.getNodeTankMinimumWaterLevel()
+            tank_max = n.getNodeTankMaximumWaterLevel()
+            tank_dia = n.getNodeTankDiameter()
+            # epyt returns these as flat arrays indexed by tank order (NOT node order)
+            for i, tid in enumerate(tank_ids):
+                tanks_info[str(tid)] = {
+                    "min_level_ft": float(tank_min[i]),
+                    "max_level_ft": float(tank_max[i]),
+                    "diameter_ft":  float(tank_dia[i]),
+                }
+        except Exception as exc:
+            print(f"[network_info] WARN: tank-detail accessors failed ({exc!r}); tanks={{}}")
+
         return {
             "junction_count":       len(junction_ids),
             "tank_count":           len(tank_ids),
@@ -260,6 +275,7 @@ class EPANETSimulator:
             "total_demand_mgd":     total_demand_gpm * 1440.0 / 1_000_000.0,
             "pattern_steps":        pattern_steps,
             "pattern_period_min":   pattern_step_sec // 60,
+            "tanks":                tanks_info,
         }
 
     def render_plot_png(self) -> bytes:
@@ -276,8 +292,9 @@ class EPANETSimulator:
             # epyt versions vary: some return the Figure, some plot to gcf()
             fig = plt.gcf()
 
+        fig.set_size_inches(12, 9)  # larger render so the embedded PNG is sharp
         buf = io.BytesIO()
-        fig.savefig(buf, format="png", dpi=120, bbox_inches="tight")
+        fig.savefig(buf, format="png", dpi=160, bbox_inches="tight")
         plt.close(fig)
         return buf.getvalue()
 

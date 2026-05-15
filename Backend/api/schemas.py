@@ -65,6 +65,12 @@ class PredictResponse(BaseModel):
     explanation: dict | None = None
 
 
+class TankInfo(BaseModel):
+    min_level_ft:  float
+    max_level_ft:  float
+    diameter_ft:   float
+
+
 class NetworkInfo(BaseModel):
     junction_count:        int
     tank_count:            int
@@ -77,3 +83,4 @@ class NetworkInfo(BaseModel):
     total_demand_mgd:      float
     pattern_steps:         int
     pattern_period_min:    int
+    tanks:                 dict[str, TankInfo] = {}

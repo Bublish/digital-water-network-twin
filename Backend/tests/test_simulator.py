@@ -103,6 +103,12 @@ def test_compute_network_info_returns_expected_counts():
     )
     assert info["pattern_steps"] > 0
     assert info["pattern_period_min"] > 0
+    assert "tanks" in info
+    assert len(info["tanks"]) == 2
+    for tid, t in info["tanks"].items():
+        assert t["min_level_ft"] >= 0
+        assert t["max_level_ft"] > t["min_level_ft"]
+        assert t["diameter_ft"] > 0
 
 
 def test_render_plot_png_returns_png_bytes():

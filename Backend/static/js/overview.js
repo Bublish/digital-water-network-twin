@@ -5,6 +5,13 @@ const banner = document.getElementById("error-banner");
 function showBanner(msg) { banner.textContent = msg; banner.hidden = false; }
 function hideBanner() { banner.hidden = true; }
 
+async function refreshStateNow() {
+  try {
+    const r = await fetch("/sim/state");
+    if (r.ok) applyState(await r.json());
+  } catch (e) { /* swallow */ }
+}
+
 function updateSimControl(state) {
   const statusEl = document.getElementById("sim-status");
   statusEl.textContent = state.status;
@@ -18,6 +25,11 @@ function updateTanks(state) {
     const li = document.querySelector(`#tank-list li[data-tank-id="${tid}"]`);
     if (!li) continue;
     li.querySelector(".tank-level").textContent = level.toFixed(1);
+    const min = parseFloat(li.dataset.tankMin || "0");
+    const max = parseFloat(li.dataset.tankMax || "1");
+    const span = max - min;
+    const pct = span > 0 ? Math.max(0, Math.min(100, ((level - min) / span) * 100)) : 0;
+    li.querySelector(".tank-fill").style.width = pct.toFixed(1) + "%";
   }
 }
 
@@ -60,6 +72,7 @@ async function postJson(url, body) {
   if (!res.ok) {
     const detail = await res.text();
     showBanner(`${url} -> ${res.status}: ${detail}`);
+    refreshStateNow();
     throw new Error(detail);
   }
   return res.json();

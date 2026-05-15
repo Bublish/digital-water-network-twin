@@ -51,6 +51,15 @@ async def lifespan(app: FastAPI):
             await app.state.runner.stop()
         await http_client.aclose()
         sim.close()
+        # ============================================================
+        # DEBUG: clear live tables on shutdown so test runs don't pile up.
+        # REMOVE THIS BLOCK BEFORE GOING TO PRODUCTION.
+        # ============================================================
+        try:
+            db.clear_live_tables()
+            logging.info("Cleared live_* and control_decisions tables on shutdown.")
+        except Exception:
+            logging.exception("Failed to clear live tables on shutdown.")
 
 
 app = FastAPI(title="SCADA Simulation API", lifespan=lifespan)

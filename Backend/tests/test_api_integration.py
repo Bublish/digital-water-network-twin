@@ -46,6 +46,10 @@ def test_app():
         "pump_count": 2, "valve_count": 0, "pipe_count": 168,
         "total_pipe_length_mi": 23.3, "total_demand_gpm": 906.0,
         "total_demand_mgd": 1.30, "pattern_steps": 96, "pattern_period_min": 15,
+        "tanks": {
+            "T1": {"min_level_ft": 0.0, "max_level_ft": 30.0, "diameter_ft": 50.0},
+            "T2": {"min_level_ft": 0.0, "max_level_ft": 35.0, "diameter_ft": 50.0},
+        },
     }
     fake_sim.render_plot_png.return_value = b"\x89PNG\r\n\x1a\n" + b"\x00" * 2000
     fake_db = MagicMock()

@@ -48,6 +48,19 @@ async def stop(request: Request) -> SimStopResponse:
     )
 
 
+@router.post("/reset", response_model=SimStartResponse)
+async def reset(req: SimStartRequest, request: Request) -> SimStartResponse:
+    """Stop any running sim, then start a fresh one. Returns the new sim_id."""
+    runner = _runner(request)
+    if runner.status == SimStatus.RUNNING:
+        await runner.stop()
+    sim_id = await runner.start(time_scale=req.time_scale)
+    return SimStartResponse(
+        status=runner.status, sim_id=sim_id,
+        time_scale=req.time_scale, started_at=_now(),
+    )
+
+
 @router.get("/state", response_model=SimState)
 async def get_state(request: Request) -> SimState:
     runner = _runner(request)

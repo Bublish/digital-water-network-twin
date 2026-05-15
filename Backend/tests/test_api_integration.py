@@ -2,6 +2,7 @@
 End-to-end test using FastAPI's TestClient. Mocks Supabase + Simulator
 to avoid network dependencies; uses the real stub ML route.
 """
+import asyncio
 import json
 import time
 from contextlib import asynccontextmanager
@@ -150,8 +151,6 @@ async def _read_first_sse_event(app, path: str = "/sim/stream", timeout: float =
     which deadlocks on long-lived streaming endpoints. To test SSE we have
     to talk ASGI directly and stop after the first body chunk.
     """
-    import asyncio as _asyncio
-
     scope = {
         "type": "http",
         "asgi": {"version": "3.0", "spec_version": "2.3"},
@@ -170,8 +169,8 @@ async def _read_first_sse_event(app, path: str = "/sim/stream", timeout: float =
     body_chunks: list[bytes] = []
     status_holder: dict = {}
     headers_holder: dict = {}
-    first_body_received = _asyncio.Event()
-    disconnect_now = _asyncio.Event()
+    first_body_received = asyncio.Event()
+    disconnect_now = asyncio.Event()
 
     async def receive():
         # First request body, then block until we want to disconnect.
@@ -191,18 +190,18 @@ async def _read_first_sse_event(app, path: str = "/sim/stream", timeout: float =
                 body_chunks.append(chunk)
                 first_body_received.set()
 
-    app_task = _asyncio.create_task(app(scope, receive, send))
+    app_task = asyncio.create_task(app(scope, receive, send))
     try:
-        await _asyncio.wait_for(first_body_received.wait(), timeout=timeout)
+        await asyncio.wait_for(first_body_received.wait(), timeout=timeout)
     finally:
         disconnect_now.set()
         try:
-            await _asyncio.wait_for(app_task, timeout=2.0)
-        except _asyncio.TimeoutError:
+            await asyncio.wait_for(app_task, timeout=2.0)
+        except asyncio.TimeoutError:
             app_task.cancel()
             try:
                 await app_task
-            except (BaseException,):
+            except asyncio.CancelledError:
                 pass
 
     assert status_holder.get("code") == 200, f"Expected 200, got {status_holder.get('code')}"
@@ -243,3 +242,31 @@ async def test_sim_stream_sends_initial_event_when_not_started(test_app):
     async with test_app.router.lifespan_context(test_app):
         event = await _read_first_sse_event(test_app)
         assert event["status"] == "NOT_STARTED"
+
+
+def test_reset_when_running_returns_new_sim_id(test_app):
+    """Reset should stop the running sim and start a fresh one with a new sim_id."""
+    fake_sim = test_app.state._fake_sim
+    fake_sim.start_simulation.side_effect = ["sim-id-1", "sim-id-2"]
+
+    with TestClient(test_app) as client:
+        r = client.post("/sim/start", json={"time_scale": 10000})
+        assert r.json()["sim_id"] == "sim-id-1"
+
+        r = client.post("/sim/reset", json={"time_scale": 10000})
+        assert r.status_code == 200
+        assert r.json()["sim_id"] == "sim-id-2"
+        assert r.json()["status"] == "RUNNING"
+
+        client.post("/sim/stop")
+
+
+def test_reset_when_not_running_starts_fresh(test_app):
+    fake_sim = test_app.state._fake_sim
+    fake_sim.start_simulation.side_effect = ["sim-fresh"]
+
+    with TestClient(test_app) as client:
+        r = client.post("/sim/reset", json={"time_scale": 10000})
+        assert r.status_code == 200
+        assert r.json()["sim_id"] == "sim-fresh"
+        client.post("/sim/stop")

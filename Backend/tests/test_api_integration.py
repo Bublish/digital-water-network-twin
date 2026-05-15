@@ -20,6 +20,7 @@ def test_app():
     """Build a FastAPI app with mocked sim and db, real ml route, real runner."""
     from api.ml_routes import router as ml_router
     from api.sim_routes import router as sim_router
+    from api.web_routes import router as web_router
     from scheduler.SimulationRunner import SimulationRunner
     from simulation.types import SimStatus
 
@@ -61,6 +62,10 @@ def test_app():
         )
         app.state.network_info = fake_sim.compute_network_info()
         app.state.network_plot_png = fake_sim.render_plot_png()
+        from fastapi.templating import Jinja2Templates
+        from pathlib import Path
+        templates_dir = Path(__file__).resolve().parent.parent / "templates"
+        app.state.templates = Jinja2Templates(directory=str(templates_dir))
         try:
             yield
         finally:
@@ -73,6 +78,7 @@ def test_app():
     app.include_router(ml_router)
     from api.network_routes import router as network_router
     app.include_router(network_router)
+    app.include_router(web_router)
     app.state._fake_sim = fake_sim
     app.state._fake_db = fake_db
     return app
@@ -270,3 +276,21 @@ def test_reset_when_not_running_starts_fresh(test_app):
         assert r.status_code == 200
         assert r.json()["sim_id"] == "sim-fresh"
         client.post("/sim/stop")
+
+
+def test_web_pages_render(test_app):
+    """All three nav pages should render with 200 + the nav links present."""
+    with TestClient(test_app) as client:
+        for path, expected_text in [
+            ("/",             "Overview"),
+            ("/pump-control", "Pump Control"),
+            ("/xai",          "XAI"),
+        ]:
+            r = client.get(path)
+            assert r.status_code == 200, f"{path} -> {r.status_code}"
+            html = r.text
+            # Nav must be present on every page
+            assert 'href="/"' in html
+            assert 'href="/pump-control"' in html
+            assert 'href="/xai"' in html
+            assert expected_text in html

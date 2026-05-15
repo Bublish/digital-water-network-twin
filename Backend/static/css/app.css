@@ -1,0 +1,98 @@
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  background: #f4f6f8;
+  color: #1f2933;
+}
+
+.topnav {
+  display: flex;
+  gap: 1.5rem;
+  padding: 0.75rem 1.25rem;
+  background: #1f2933;
+  color: #fff;
+}
+.topnav a {
+  color: #cbd5e1;
+  text-decoration: none;
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+}
+.topnav a.active,
+.topnav a:hover { color: #fff; background: #334155; }
+
+main {
+  max-width: 1200px;
+  margin: 1rem auto;
+  padding: 0 1rem;
+}
+
+.card {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  padding: 1rem 1.25rem;
+  margin-bottom: 1rem;
+  box-shadow: 0 1px 2px rgba(0,0,0,.04);
+}
+.card h2 { margin-top: 0; font-size: 1.1rem; }
+.card h3 { font-size: 0.95rem; margin: 0.5rem 0; }
+
+.two-col {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.5rem;
+}
+
+.sim-status-row { margin-bottom: 0.5rem; }
+.sim-controls-row { display: flex; gap: 0.5rem; align-items: center; }
+.sim-controls-row button {
+  padding: 0.35rem 0.75rem;
+  border: 1px solid #94a3b8;
+  background: #f8fafc;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.sim-controls-row button:hover { background: #e2e8f0; }
+
+.data-list { list-style: none; padding: 0; margin: 0; }
+.data-list li {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.35rem 0;
+  border-bottom: 1px solid #f1f5f9;
+}
+.data-list li:last-child { border-bottom: none; }
+.row-id { font-family: ui-monospace, monospace; min-width: 3rem; }
+
+.status {
+  display: inline-block;
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  background: #cbd5e1;
+  color: #1f2933;
+}
+.status-running     { background: #16a34a; color: #fff; }
+.status-stopped     { background: #dc2626; color: #fff; }
+.status-not_started { background: #94a3b8; color: #fff; }
+.status-open        { background: #16a34a; color: #fff; }
+.status-closed      { background: #64748b; color: #fff; }
+
+.network-plot { max-width: 100%; height: auto; border: 1px solid #e2e8f0; }
+.network-info { display: grid; grid-template-columns: auto 1fr; gap: 0.4rem 1rem; margin: 0; }
+.network-info dt { font-weight: 600; color: #475569; }
+.network-info dd { margin: 0; }
+
+.error-banner {
+  margin-top: 0.5rem;
+  padding: 0.4rem 0.75rem;
+  background: #fef3c7;
+  border: 1px solid #fcd34d;
+  border-radius: 4px;
+  color: #78350f;
+}

@@ -292,7 +292,7 @@ class SimulationRunner:
         ]
         decision_rows = [
             {"sim_id": self._sim_id, "sim_time_hr": sim_hr, "pump_id": pump_id,
-             "ml_commanded": ml_commands.get(pump_id, "CLOSED"),
+             "ml_commanded": ml_commands.get(pump_id, "NOP"),
              "applied_status": final_commands[pump_id],
              "mode": self._pump_modes[pump_id].value,
              "model_id": model_id, "current_price": current_price, "explanation": None}

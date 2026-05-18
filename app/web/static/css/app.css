@@ -83,7 +83,44 @@ main {
 .status-open        { background: #16a34a; color: #fff; }
 .status-closed      { background: #64748b; color: #fff; }
 
-.network-plot { max-width: 100%; height: auto; border: 1px solid #e2e8f0; }
+.network-plot-wrap {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid #e2e8f0;
+  border-radius: 4px;
+  background: #fff;
+  height: 520px;
+  cursor: grab;
+}
+.network-plot-wrap:active { cursor: grabbing; }
+.network-plot { width: 100%; height: 100%; }
+.network-plot svg { width: 100%; height: 100%; display: block; }
+.network-tooltip {
+  position: absolute;
+  pointer-events: none;
+  background: #1e293b;
+  color: #fff;
+  padding: 6px 9px;
+  border-radius: 3px;
+  font-size: 12px;
+  line-height: 1.35;
+  font-family: ui-monospace, monospace;
+  z-index: 10;
+  white-space: pre;
+}
+#network-reset {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 10;
+  padding: 0.25rem 0.6rem;
+  border: 1px solid #94a3b8;
+  background: #f8fafc;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.8rem;
+}
+#network-reset:hover { background: #e2e8f0; }
 .network-info { display: grid; grid-template-columns: auto 1fr; gap: 0.4rem 1rem; margin: 0; }
 .network-info dt { font-weight: 600; color: #475569; }
 .network-info dd { margin: 0; }

@@ -3,7 +3,7 @@
 """
 from fastapi import APIRouter, Request, Response
 
-from api.schemas import NetworkInfo
+from app.api.schemas import NetworkInfo
 
 router = APIRouter(prefix="/network")
 
@@ -13,9 +13,9 @@ async def get_info(request: Request) -> NetworkInfo:
     return NetworkInfo(**request.app.state.network_info)
 
 
-@router.get("/plot.png")
-async def get_plot(request: Request) -> Response:
+@router.get("/plot.svg")
+async def get_plot_svg(request: Request) -> Response:
     return Response(
-        content=request.app.state.network_plot_png,
-        media_type="image/png",
+        content=request.app.state.network_plot_svg,
+        media_type="image/svg+xml",
     )

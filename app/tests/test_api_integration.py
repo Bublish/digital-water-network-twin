@@ -18,11 +18,11 @@ from httpx import ASGITransport
 @pytest.fixture
 def test_app():
     """Build a FastAPI app with mocked sim and db, real ml route, real runner."""
-    from api.ml_routes import router as ml_router
-    from api.sim_routes import router as sim_router
-    from api.web_routes import router as web_router
-    from scheduler.SimulationRunner import SimulationRunner
-    from simulation.types import SimStatus
+    from app.api.ml_routes import router as ml_router
+    from app.api.sim_routes import router as sim_router
+    from app.api.web_routes import router as web_router
+    from app.scheduler.SimulationRunner import SimulationRunner
+    from app.simulation.types import SimStatus
 
     # Build a fake sim that mimics EPANETSimulator
     fake_sim = MagicMock()
@@ -68,7 +68,7 @@ def test_app():
         app.state.network_plot_png = fake_sim.render_plot_png()
         from fastapi.templating import Jinja2Templates
         from pathlib import Path
-        templates_dir = Path(__file__).resolve().parent.parent / "templates"
+        templates_dir = Path(__file__).resolve().parent.parent / "web" / "templates"
         app.state.templates = Jinja2Templates(directory=str(templates_dir))
         try:
             yield
@@ -80,7 +80,7 @@ def test_app():
     app = FastAPI(lifespan=lifespan)
     app.include_router(sim_router)
     app.include_router(ml_router)
-    from api.network_routes import router as network_router
+    from app.api.network_routes import router as network_router
     app.include_router(network_router)
     app.include_router(web_router)
     app.state._fake_sim = fake_sim

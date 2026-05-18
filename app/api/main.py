@@ -1,8 +1,8 @@
 """
 FastAPI app factory.
 
-Run from Backend/:
-    uvicorn api.main:app --reload
+Run from the repo root:
+    uvicorn app.api.main:app --reload
 """
 import logging
 from contextlib import asynccontextmanager
@@ -13,21 +13,21 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from api.ml_routes import router as ml_router
-from api.network_routes import router as network_router
-from api.sim_routes import router as sim_router
-from api.web_routes import router as web_router
-from db.SupabaseClient import SupabaseDB
-from scheduler.SimulationRunner import SimulationRunner
-from simulation.Simulator import EPANETSimulator
-from simulation.types import SimStatus
+from app.api.ml_routes import router as ml_router
+from app.api.network_routes import router as network_router
+from app.api.sim_routes import router as sim_router
+from app.api.web_routes import router as web_router
+from app.db.SupabaseClient import SupabaseDB
+from app.scheduler.SimulationRunner import SimulationRunner
+from app.simulation.Simulator import EPANETSimulator
+from app.simulation.types import SimStatus
 
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s %(levelname)s %(name)s | %(message)s")
 
-BACKEND_ROOT = Path(__file__).resolve().parent.parent
-TEMPLATES_DIR = BACKEND_ROOT / "templates"
-STATIC_DIR = BACKEND_ROOT / "static"
+APP_ROOT = Path(__file__).resolve().parent.parent
+TEMPLATES_DIR = APP_ROOT / "web" / "templates"
+STATIC_DIR = APP_ROOT / "web" / "static"
 
 
 @asynccontextmanager
@@ -42,7 +42,9 @@ async def lifespan(app: FastAPI):
         ml_url="http://localhost:8000/ml/predict",
     )
     app.state.network_info = sim.compute_network_info()
-    app.state.network_plot_png = sim.render_plot_png()
+    svg_str, geometry = sim.render_plot_svg()
+    app.state.network_plot_svg = svg_str
+    app.state.network_geometry = geometry
     app.state.templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
     try:
         yield

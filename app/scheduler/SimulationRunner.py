@@ -22,7 +22,7 @@ from typing import Any
 
 import httpx
 
-from simulation.types import PumpMode, SimStatus, StepResult, StepState
+from app.simulation.types import PumpMode, SimStatus, StepResult, StepState
 
 logger = logging.getLogger(__name__)
 
@@ -288,6 +288,8 @@ class SimulationRunner:
             "tank_levels":  result.tank_levels,
             "pump_states":  result.pump_states,
             "pump_modes":   {p: m.value for p, m in self._pump_modes.items()},
+            "pressures":    result.pressures,
+            "flows":        result.flows,
             "last_step_at": _now_iso(),
         }
 
@@ -302,6 +304,8 @@ class SimulationRunner:
                 "tank_levels":  {},
                 "pump_states":  {},
                 "pump_modes":   {p: m.value for p, m in self._pump_modes.items()},
+                "pressures":    {},
+                "flows":        {},
                 "last_step_at": None,
             }
         return dict(self._cached_state)

@@ -28,8 +28,8 @@ def mock_db():
 
 @pytest.mark.asyncio
 async def test_start_sets_status_to_running(mock_sim, mock_db):
-    from scheduler.SimulationRunner import SimulationRunner
-    from simulation.types import SimStatus
+    from app.scheduler.SimulationRunner import SimulationRunner
+    from app.simulation.types import SimStatus
 
     runner = SimulationRunner(sim=mock_sim, db=mock_db, http_client=AsyncMock())
     assert runner.status == SimStatus.NOT_STARTED
@@ -42,7 +42,7 @@ async def test_start_sets_status_to_running(mock_sim, mock_db):
 
 @pytest.mark.asyncio
 async def test_double_start_raises(mock_sim, mock_db):
-    from scheduler.SimulationRunner import SimulationRunner
+    from app.scheduler.SimulationRunner import SimulationRunner
 
     runner = SimulationRunner(sim=mock_sim, db=mock_db, http_client=AsyncMock())
     await runner.start(time_scale=10_000)
@@ -52,8 +52,8 @@ async def test_double_start_raises(mock_sim, mock_db):
 
 
 def test_resolve_overrides_hand_wins_over_ml():
-    from scheduler.SimulationRunner import SimulationRunner
-    from simulation.types import PumpMode
+    from app.scheduler.SimulationRunner import SimulationRunner
+    from app.simulation.types import PumpMode
 
     runner = SimulationRunner.__new__(SimulationRunner)
     runner._pump_modes = {
@@ -69,8 +69,8 @@ def test_resolve_overrides_hand_wins_over_ml():
 
 
 def test_set_override_mutates_pump_modes():
-    from scheduler.SimulationRunner import SimulationRunner
-    from simulation.types import PumpMode
+    from app.scheduler.SimulationRunner import SimulationRunner
+    from app.simulation.types import PumpMode
 
     runner = SimulationRunner.__new__(SimulationRunner)
     runner._pump_modes = {"P1": PumpMode.AUTO, "P2": PumpMode.AUTO}
@@ -83,8 +83,8 @@ def test_set_override_mutates_pump_modes():
 
 @pytest.mark.asyncio
 async def test_tick_calls_ml_applies_override_persists(mock_sim, mock_db):
-    from scheduler.SimulationRunner import SimulationRunner
-    from simulation.types import PumpMode, SimStatus
+    from app.scheduler.SimulationRunner import SimulationRunner
+    from app.simulation.types import PumpMode, SimStatus
 
     http = AsyncMock()
     http.post.return_value = MagicMock(
@@ -116,8 +116,8 @@ async def test_tick_calls_ml_applies_override_persists(mock_sim, mock_db):
 
 @pytest.mark.asyncio
 async def test_tick_falls_back_when_ml_fails(mock_sim, mock_db):
-    from scheduler.SimulationRunner import SimulationRunner
-    from simulation.types import PumpMode, SimStatus
+    from app.scheduler.SimulationRunner import SimulationRunner
+    from app.simulation.types import PumpMode, SimStatus
 
     http = AsyncMock()
     http.post.side_effect = httpx.HTTPError("boom")
@@ -142,7 +142,7 @@ async def test_tick_falls_back_when_ml_fails(mock_sim, mock_db):
 @pytest.mark.asyncio
 async def test_subscribe_receives_state_after_tick(mock_sim, mock_db):
     """A subscriber queue should receive the cached state dict each tick."""
-    from scheduler.SimulationRunner import SimulationRunner
+    from app.scheduler.SimulationRunner import SimulationRunner
 
     http = AsyncMock()
     http.post.return_value = MagicMock(
@@ -167,7 +167,7 @@ async def test_subscribe_receives_state_after_tick(mock_sim, mock_db):
 
 @pytest.mark.asyncio
 async def test_unsubscribe_stops_receiving(mock_sim, mock_db):
-    from scheduler.SimulationRunner import SimulationRunner
+    from app.scheduler.SimulationRunner import SimulationRunner
 
     http = AsyncMock()
     http.post.return_value = MagicMock(
@@ -195,7 +195,7 @@ async def test_stop_broadcasts_final_state(mock_sim, mock_db):
     Without this broadcast the frontend's SSE never learns the sim stopped,
     so it keeps showing RUNNING and the user's next /sim/stop click 409s.
     """
-    from scheduler.SimulationRunner import SimulationRunner
+    from app.scheduler.SimulationRunner import SimulationRunner
 
     http = AsyncMock()
     http.post.return_value = MagicMock(
@@ -223,7 +223,7 @@ async def test_stop_broadcasts_final_state(mock_sim, mock_db):
 @pytest.mark.asyncio
 async def test_broadcast_drops_for_full_queue(mock_sim, mock_db):
     """A queue that's already full must not block the tick loop."""
-    from scheduler.SimulationRunner import SimulationRunner
+    from app.scheduler.SimulationRunner import SimulationRunner
 
     http = AsyncMock()
     http.post.return_value = MagicMock(

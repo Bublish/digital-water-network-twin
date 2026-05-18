@@ -16,7 +16,7 @@ pytestmark = pytest.mark.skipif(
 
 @pytest.fixture
 def sim():
-    from simulation.Simulator import EPANETSimulator
+    from app.simulation.Simulator import EPANETSimulator
     with EPANETSimulator() as s:
         yield s
 
@@ -47,7 +47,7 @@ def test_rotate_demand_pattern_installs_96_step_pattern(sim):
 
 
 def test_read_state_returns_step_state(sim):
-    from simulation.types import StepState
+    from app.simulation.types import StepState
     sim.start_simulation()
     sim.rotate_demand_pattern()
     state = sim.read_state()
@@ -72,7 +72,7 @@ def test_apply_pump_commands_changes_pump_status(sim):
 
 
 def test_step_advances_sim_time_and_returns_step_result(sim):
-    from simulation.types import StepResult
+    from app.simulation.types import StepResult
     sim.start_simulation()
     sim.rotate_demand_pattern()
     t0 = sim.read_state().sim_time_sec
@@ -86,7 +86,7 @@ def test_step_advances_sim_time_and_returns_step_result(sim):
 
 def test_compute_network_info_returns_expected_counts():
     """Hits the real WSN1 network — requires Supabase + WSN1.inp upload."""
-    from simulation.Simulator import EPANETSimulator
+    from app.simulation.Simulator import EPANETSimulator
 
     with EPANETSimulator() as sim:
         info = sim.compute_network_info()
@@ -112,7 +112,7 @@ def test_compute_network_info_returns_expected_counts():
 
 
 def test_render_plot_png_returns_png_bytes():
-    from simulation.Simulator import EPANETSimulator
+    from app.simulation.Simulator import EPANETSimulator
 
     with EPANETSimulator() as sim:
         png = sim.render_plot_png()

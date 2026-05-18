@@ -2,12 +2,12 @@ from unittest.mock import MagicMock, patch
 
 
 def test_insert_control_decision_calls_correct_table():
-    from db.SupabaseClient import SupabaseDB
+    from app.db.SupabaseClient import SupabaseDB
 
     # Force a fresh instance, mock the client
     SupabaseDB._instance = None
-    with patch("db.SupabaseClient.create_client") as mock_create, \
-         patch("db.SupabaseClient.load_dotenv"), \
+    with patch("app.db.SupabaseClient.create_client") as mock_create, \
+         patch("app.db.SupabaseClient.load_dotenv"), \
          patch.dict("os.environ", {"SUPABASE_URL": "x", "SUPABASE_KEY": "y"}):
         mock_client = MagicMock()
         mock_create.return_value = mock_client

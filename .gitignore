@@ -30,8 +30,8 @@ ENV/
 *.user
 
 # Large derived data files (regenerate from WSN1.rpt via notebook)
-Backend/data pipeline/WSN1 - report.txt
-Backend/data pipeline/WSN1_temp.txt
+app/data/WSN1 - report.txt
+app/data/WSN1_temp.txt
 
 # OS
 .DS_Store
@@ -39,3 +39,6 @@ Thumbs.db
 
 # Plans
 docs
+
+# Claude Code local worktrees
+.claude/worktrees/

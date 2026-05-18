@@ -28,9 +28,10 @@ The app allows operators to import EPANET network files, view live network state
 ## Repository Layout
 
 ```
-Backend/
-  api/                  # FastAPI route handlers (not yet implemented)
-  data pipeline/        # Input data, raw EPANET output, and the main analysis notebook
+app/
+  __init__.py           # marks app/ as a package so `from app.X import ...` resolves
+  api/                  # FastAPI route handlers + app factory (main.py)
+  data/                 # Input data, raw EPANET output, and the main analysis notebook
     WSN1.inp            # EPANET network definition (local copy; canonical copy is in Supabase storage)
     WSN1.rpt            # Full EPANET hydraulic report (raw simulation output)
     WSN1 - report.txt   # Parsed node/link results used by the notebook
@@ -39,12 +40,16 @@ Backend/
   db/
     SupabaseClient.py   # Supabase singleton client (all DB I/O goes here)
   ml/                   # ML model training, inference, and XAI modules (not yet implemented)
-  scheduler/            # Pump control scheduling logic (not yet implemented)
+  scheduler/
+    SimulationRunner.py # Owns the long-running simulation task + state machine
   simulation/
     Simulator.py        # EPANETSimulator class (context manager, wraps epyt)
     Pattern.py          # DemandPattern — 96-step sinusoidal multiplier array with lognormal noise
     Randomizer.py       # Randomizer — lognormal noise for base demands and pattern arrays
-  main.py               # Debug runner — loops run_24_hour_cycle() continuously
+  tests/                # pytest suite; conftest.py puts repo root on sys.path
+  web/
+    templates/          # Jinja2 templates (base.html, overview.html, pump_control.html, xai.html)
+    static/             # CSS, JS, and third-party vendor assets
 requirements.txt        # Minimal; most ML/web dependencies must be installed separately
 .env                    # SUPABASE_URL and SUPABASE_KEY
 ```
@@ -60,29 +65,28 @@ pip install -r requirements.txt
 # Install remaining dependencies not yet in requirements.txt
 pip install fastapi uvicorn python-multipart jinja2 pandas scikit-learn xgboost pygam interpret shap matplotlib
 
-# Current debug runner — must be run from the Backend/ directory
-cd Backend
-python main.py
+# FastAPI server — run from the repo root
+uvicorn app.api.main:app --reload
 
-# Future FastAPI server (once Backend/api/main.py is implemented)
-uvicorn Backend.api.main:app --reload
+# Pytest — run from the repo root
+pytest app/tests/
 
 # Run the analysis notebook
-cd "Backend/data pipeline"
+cd app/data
 jupyter notebook "EPANET Analysis.ipynb"
 ```
 
-A VS Code launch config already exists in `.vscode/launch.json` and runs `Backend/main.py`.
+A VS Code launch config exists at `.vscode/launch.json` and runs `uvicorn app.api.main:app` from the workspace root.
 
-> ⚠ `main.py` uses unqualified imports (`from simulation.Simulator import ...`) so it **must** be executed from the `Backend/` directory, not the project root.
+> All Python modules use absolute `app.*` imports (e.g. `from app.simulation.Simulator import EPANETSimulator`). The repo root must be on `sys.path` — `pytest` handles this via `app/tests/conftest.py`; `uvicorn` and `python -m app.api.main` work because the repo root is the CWD.
 
 ---
 
-## Simulation Architecture (`Backend/simulation/`)
+## Simulation Architecture (`app/simulation/`)
 
 ### EPANETSimulator (`Simulator.py`)
 
-Context manager wrapping `epyt`. On construction it downloads `WSN1.inp` from the Supabase `network` storage bucket into a temp directory — the local file in `data pipeline/` is a reference copy only.
+Context manager wrapping `epyt`. On construction it downloads `WSN1.inp` from the Supabase `network` storage bucket into a temp directory — the local file in `app/data/` is a reference copy only.
 
 | Method | Description |
 |---|---|
@@ -108,7 +112,7 @@ Two static methods sharing `σ=0.15, μ=−σ²/2` (zero-bias lognormal):
 
 ---
 
-## SupabaseDB (`Backend/db/SupabaseClient.py`)
+## SupabaseDB (`app/db/SupabaseClient.py`)
 
 Singleton pattern; credentials from `.env`. All DB operations must use this class — never instantiate `supabase.create_client` elsewhere.
 

@@ -1,6 +1,8 @@
 """
 Server-rendered page routes (Jinja2). All three nav pages live here.
 """
+import json
+
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
 
@@ -14,9 +16,11 @@ async def overview(request: Request) -> HTMLResponse:
     return request.app.state.templates.TemplateResponse(
         request, "overview.html",
         {
-            "active":            "overview",
-            "network_info":      request.app.state.network_info,
-            "initial_sim_state": initial_sim_state,
+            "active":                "overview",
+            "network_info":          request.app.state.network_info,
+            "initial_sim_state":     initial_sim_state,
+            "network_plot_svg":      request.app.state.network_plot_svg,
+            "network_geometry_json": json.dumps(request.app.state.network_geometry),
         },
     )
 

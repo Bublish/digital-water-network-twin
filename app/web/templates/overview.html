@@ -66,7 +66,13 @@
 <section class="card" id="network">
   <h2>Network</h2>
   <div class="two-col">
-    <img src="/network/plot.png" alt="WSN1 network" class="network-plot">
+    <div class="network-plot-wrap">
+      <div id="network-plot" class="network-plot">
+        {{ network_plot_svg|safe }}
+      </div>
+      <div id="network-tooltip" class="network-tooltip" hidden></div>
+      <button type="button" id="network-reset" title="Reset view">Reset</button>
+    </div>
     <dl class="network-info">
       <dt>Junctions</dt>    <dd>{{ network_info.junction_count }}</dd>
       <dt>Tanks</dt>        <dd>{{ network_info.tank_count }}</dd>
@@ -83,5 +89,6 @@
 {% endblock %}
 
 {% block scripts %}
-  <script src="/static/js/overview.js" defer></script>
+  <script type="application/json" id="network-geometry">{{ network_geometry_json|safe }}</script>
+  <script src="/static/js/overview.js"></script>
 {% endblock %}

@@ -39,10 +39,25 @@ def test_double_start_raises(sim):
 
 def test_rotate_demand_pattern_installs_96_step_pattern(sim):
     sim.start_simulation()
+    # Before any rotation, no pattern is exposed
+    assert sim.current_pattern_id is None
+    assert sim.current_pattern_multipliers() == []
+
     sim.rotate_demand_pattern()
     # After rotation, a pattern with 96 multipliers should be installed
     pattern_count = sim._network.getPatternCount()
     assert pattern_count >= 1
+    first_id = sim.current_pattern_id
+    first_multipliers = sim.current_pattern_multipliers()
+    assert first_id is not None
+    assert len(first_multipliers) == 96
+    assert all(isinstance(x, float) for x in first_multipliers)
+
+    # A subsequent rotation produces a new id and (almost certainly) a new array
+    sim.rotate_demand_pattern()
+    assert sim.current_pattern_id != first_id
+    assert len(sim.current_pattern_multipliers()) == 96
+
     sim.stop_simulation()
 
 

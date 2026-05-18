@@ -52,6 +52,8 @@ def test_app():
         },
     }
     fake_sim.render_plot_png.return_value = b"\x89PNG\r\n\x1a\n" + b"\x00" * 2000
+    fake_sim.current_pattern_id = None
+    fake_sim.current_pattern_multipliers.return_value = []
     fake_db = MagicMock()
 
     @asynccontextmanager
@@ -66,6 +68,9 @@ def test_app():
         )
         app.state.network_info = fake_sim.compute_network_info()
         app.state.network_plot_png = fake_sim.render_plot_png()
+        app.state.network_plot_svg_light = "<svg xmlns='http://www.w3.org/2000/svg'/>"
+        app.state.network_plot_svg_dark  = "<svg xmlns='http://www.w3.org/2000/svg'/>"
+        app.state.network_geometry = {"svg_width": 100, "svg_height": 100, "nodes": [], "links": []}
         from fastapi.templating import Jinja2Templates
         from pathlib import Path
         templates_dir = Path(__file__).resolve().parent.parent / "web" / "templates"

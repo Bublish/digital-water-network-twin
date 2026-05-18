@@ -3,16 +3,38 @@
 <head>
   <meta charset="utf-8">
   <title>{% block title %}WSN1 SCADA{% endblock %}</title>
-  <link rel="stylesheet" href="/static/css/app.css">
+  <script>
+    // Pre-stylesheet theme bootstrap — runs synchronously to avoid FOUC.
+    (function () {
+      try {
+        var saved = localStorage.getItem("theme");
+        var prefersDark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+        var theme = saved || (prefersDark ? "dark" : "light");
+        document.documentElement.setAttribute("data-theme", theme);
+      } catch (e) {
+        document.documentElement.setAttribute("data-theme", "light");
+      }
+    })();
+  </script>
+  <link rel="stylesheet" href="/static/vendor/uPlot.min.css?v=1">
+  <link rel="stylesheet" href="/static/css/app.css?v=2">
 </head>
 <body>
   <nav class="topnav">
-    <a href="/"             class="{% if active == 'overview' %}active{% endif %}">Overview</a>
-    <a href="/pump-control" class="{% if active == 'pump'     %}active{% endif %}">Pump Control</a>
-    <a href="/xai"          class="{% if active == 'xai'      %}active{% endif %}">XAI</a>
+    <div class="topnav-links">
+      <a href="/"             class="{% if active == 'overview' %}active{% endif %}">Overview</a>
+      <a href="/pump-control" class="{% if active == 'pump'     %}active{% endif %}">Pump Control</a>
+      <a href="/xai"          class="{% if active == 'xai'      %}active{% endif %}">XAI</a>
+    </div>
+    <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Toggle theme" title="Toggle theme">
+      <svg class="icon-sun"  width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
+      <svg class="icon-moon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+    </button>
   </nav>
   <main>{% block content %}{% endblock %}</main>
   <script src="/static/vendor/panzoom.min.js"></script>
+  <script src="/static/vendor/uPlot.iife.min.js"></script>
+  <script src="/static/js/theme-toggle.js?v=1"></script>
   {% block scripts %}{% endblock %}
 </body>
 </html>

@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 This is a **SCADA web application** for monitoring and managing water distribution networks. The primary feature is an AI-based pump control system with explainable AI (XAI) analysis of pump scheduling decisions. The network under study is **WSN1** (Water Sensor Network 1) — a hypothetical transmission dense-loop network from the Battle of the Networks benchmark (Ostfeld, 2021) with ~130 junctions, 1 reservoir, 2 pump stations, 2 tanks, and 23.3 miles of pipe.
 
-The app allows operators to import EPANET network files, view live network state, inspect AI pump control decisions with XAI breakdowns, and run ML ensemble pressure/demand predictions.
+The backend runs a continuous EPANET hydraulic simulation stepped at 15-min intervals. Each step the simulator reads tank/pump state, asks an ML service for pump commands, applies them, solves hydraulics, persists results to Supabase, and pushes the new state to all connected browsers via Server-Sent Events.
 
 ---
 
@@ -14,13 +14,13 @@ The app allows operators to import EPANET network files, view live network state
 
 | Layer | Technology |
 |---|---|
-| Backend framework | FastAPI |
+| Backend framework | FastAPI (lifespan-managed singletons) |
 | Templating | Jinja2 (server-side rendered HTML) |
-| Frontend | HTML + CSS (no JS framework) |
+| Frontend | Vanilla HTML/CSS/JS, no framework; `EventSource` for live updates |
 | Database & storage | Supabase (project: **EPANETSIM**) |
-| EPANET engine | epyt (wraps the EPANET C engine) |
-| Network visualisation | `epyt` `.plot()` method, served as inline SVG/PNG |
-| ML models | XGBoost, MLP (sklearn), GAM (pygam), EBM (interpret) |
+| EPANET engine | `epyt` (wraps the EPANET C engine) |
+| Network visualisation | `epyt.plot()` → matplotlib SVG, with a JSON geometry sidecar for client hit-testing |
+| ML models (notebook) | XGBoost, MLP (sklearn), GAM (pygam), EBM (interpret) |
 | Explainability | SHAP, permutation importance |
 
 ---
@@ -29,189 +29,245 @@ The app allows operators to import EPANET network files, view live network state
 
 ```
 app/
-  __init__.py           # marks app/ as a package so `from app.X import ...` resolves
-  api/                  # FastAPI route handlers + app factory (main.py)
-  data/                 # Input data, raw EPANET output, and the main analysis notebook
-    WSN1.inp            # EPANET network definition (local copy; canonical copy is in Supabase storage)
-    WSN1.rpt            # Full EPANET hydraulic report (raw simulation output)
-    WSN1 - report.txt   # Parsed node/link results used by the notebook
-    DMA4_demand.pat     # Demand pattern file
-    EPANET Analysis.ipynb  # Main ML pipeline notebook (predictions, evaluation, explainability)
+  __init__.py
+  api/
+    main.py              # FastAPI app factory + lifespan (wires singletons onto app.state)
+    sim_routes.py        # /sim/{start,stop,reset,state,stream,override,overrides}
+    ml_routes.py         # POST /ml/predict (stub controller)
+    network_routes.py    # GET /network/{info,plot.svg}
+    web_routes.py        # GET /, /pump-control, /xai (Jinja2 pages)
+    schemas.py           # Pydantic HTTP-boundary models
+  data/
+    WSN1.inp             # EPANET network (local reference; canonical copy in Supabase storage)
+    WSN1.rpt             # Raw EPANET hydraulic report
+    WSN1 - report.txt    # Pre-parsed node/link results used by the notebook
+    DMA4_demand.pat      # Demand pattern file
+    EPANET Analysis.ipynb  # Offline ML pipeline (predictions, evaluation, explainability)
   db/
-    SupabaseClient.py   # Supabase singleton client (all DB I/O goes here)
-  ml/                   # ML model training, inference, and XAI modules (not yet implemented)
+    SupabaseClient.py    # SupabaseDB singleton — all storage + DB I/O goes here
   scheduler/
-    SimulationRunner.py # Owns the long-running simulation task + state machine
+    SimulationRunner.py  # Async tick-loop orchestrator (state machine, SSE broadcast)
   simulation/
-    Simulator.py        # EPANETSimulator class (context manager, wraps epyt)
-    Pattern.py          # DemandPattern — 96-step sinusoidal multiplier array with lognormal noise
-    Randomizer.py       # Randomizer — lognormal noise for base demands and pattern arrays
-  tests/                # pytest suite; conftest.py puts repo root on sys.path
+    Simulator.py         # EPANETSimulator — context manager wrapping epyt
+    Pattern.py           # DemandPattern — 96-step sinusoidal multipliers + lognormal noise
+    Randomizer.py        # Lognormal noise for base demands and pattern arrays
+    types.py             # Internal dataclasses + enums (SimStatus, PumpMode, StepState, StepResult)
+  tests/                 # pytest suite; conftest.py adds repo root to sys.path
   web/
-    templates/          # Jinja2 templates (base.html, overview.html, pump_control.html, xai.html)
-    static/             # CSS, JS, and third-party vendor assets
-requirements.txt        # Minimal; most ML/web dependencies must be installed separately
-.env                    # SUPABASE_URL and SUPABASE_KEY
+    templates/           # base.html, overview.html, pump_control.html, xai.html
+    static/              # css/, js/, vendor/
+requirements.txt
+.env                     # SUPABASE_URL, SUPABASE_KEY
 ```
+
+> All Python modules use absolute `app.*` imports. The repo root must be on `sys.path` — `pytest` handles this via `app/tests/conftest.py`; `uvicorn app.api.main:app` works when launched from the repo root.
 
 ---
 
 ## Running the App
 
 ```bash
-# Install core dependencies
+# Install dependencies (requirements.txt already covers fastapi/uvicorn/httpx/pydantic/pytest)
 pip install -r requirements.txt
 
-# Install remaining dependencies not yet in requirements.txt
-pip install fastapi uvicorn python-multipart jinja2 pandas scikit-learn xgboost pygam interpret shap matplotlib
+# Notebook-only ML deps (not needed to run the web app):
+pip install pandas scikit-learn xgboost pygam interpret shap matplotlib jupyter
 
 # FastAPI server — run from the repo root
 uvicorn app.api.main:app --reload
 
-# Pytest — run from the repo root
+# Full pytest suite
 pytest app/tests/
 
-# Run the analysis notebook
-cd app/data
-jupyter notebook "EPANET Analysis.ipynb"
+# Run a single test
+pytest app/tests/test_simulation_runner.py::test_name
 ```
 
-A VS Code launch config exists at `.vscode/launch.json` and runs `uvicorn app.api.main:app` from the workspace root.
+VS Code launch config at `.vscode/launch.json` runs `uvicorn app.api.main:app` from the workspace root.
 
-> All Python modules use absolute `app.*` imports (e.g. `from app.simulation.Simulator import EPANETSimulator`). The repo root must be on `sys.path` — `pytest` handles this via `app/tests/conftest.py`; `uvicorn` and `python -m app.api.main` work because the repo root is the CWD.
+> ⚠ **Supabase setup required before first run:** upload `WSN1.inp` to the `network` storage bucket — `EPANETSimulator.__init__` downloads it on construction and will raise `RuntimeError` if missing.
 
 ---
 
-## Simulation Architecture (`app/simulation/`)
+## Runtime Architecture
 
-### EPANETSimulator (`Simulator.py`)
+### Startup (`app/api/main.py` lifespan)
 
-Context manager wrapping `epyt`. On construction it downloads `WSN1.inp` from the Supabase `network` storage bucket into a temp directory — the local file in `app/data/` is a reference copy only.
+On FastAPI startup, one each of these is constructed and stashed on `app.state`:
+
+- `EPANETSimulator()` then `.load()` — opens the network in a tempdir; **does not start the hydraulic loop**.
+- `SupabaseDB()` — singleton client.
+- `httpx.AsyncClient()` — used by the runner to call `/ml/predict`.
+- `SimulationRunner(sim, db, http_client, ml_url=...)` → `app.state.runner`.
+- `sim.compute_network_info()` → `app.state.network_info`.
+- `sim.render_plot_svg()` → `(svg_str, geometry)` → `app.state.network_plot_svg`, `app.state.network_geometry`.
+- `Jinja2Templates(...)` → `app.state.templates`.
+
+The runner is in `NOT_STARTED` until a client POSTs `/sim/start`.
+
+On shutdown the runner is stopped, the HTTP client is closed, the simulator is closed (epyt unloaded, tempdir removed), then `db.clear_live_tables()` is called. **The `clear_live_tables` call is debug-only and is marked for removal before production.**
+
+### SimulationRunner state machine
+
+```
+NOT_STARTED --start(time_scale)--> RUNNING --stop()--> STOPPED
+                                     |                    |
+                                     +----- start() ------+
+```
+
+`time_scale` controls how fast simulated time advances: `900 / time_scale` wall-seconds per step. `1` = real-time, `60` = demo, `10000` = fast. `/sim/reset` is `stop` + `start` in one call.
+
+### Tick loop (every 15 min of sim time)
+
+For each tick under `self._lock`:
+
+1. **Day boundary**: every 96 steps (incl. step 0), call `sim.rotate_demand_pattern()` — installs a fresh lognormal 96-step pattern and re-randomizes per-node base demands.
+2. **Read state**: `sim.read_state()` returns `StepState(sim_time_sec, tank_levels, pump_states)`.
+3. **Call ML**: POST `PredictRequest` (sim_time_hr, tank_levels, pump_modes, current_price) to `ml_url` with a **2-second timeout**. On any failure, fall back to the last successful commands (or `CLOSED` for all if none yet) and tag `model_id="stub-v0+fallback"`.
+4. **Resolve overrides**: HAND_OPEN/HAND_CLOSED win over the ML command; AUTO defers to ML.
+5. **Apply + solve**: `sim.apply_pump_commands(final_commands)` then `sim.step()`. On `StopIteration` the runner stops. Other exceptions retry up to **3 hydraulic failures** before stopping.
+6. **Persist**: insert one batch each into `live_node_results`, `live_link_results`, `control_decisions`. Supabase failures are logged and dropped — they do not stop the loop.
+7. **Cache + broadcast**: store `_cached_state` (served by `/sim/state`) and push it to every SSE subscriber via `asyncio.Queue`. Slow consumers are dropped non-blocking.
+
+### Pump overrides
+
+`PumpMode = AUTO | HAND_OPEN | HAND_CLOSED`. `set_override(pump_id, mode)` can be called any time, including in `NOT_STARTED` — modes are kept in memory and take effect on the next tick. Modes default to `AUTO` for every pump in the network on `start`.
+
+### Schema split
+
+- `app/simulation/types.py` — plain dataclasses (`StepState`, `StepResult`) + enums. Used *below* the HTTP boundary, between `EPANETSimulator` and `SimulationRunner`.
+- `app/api/schemas.py` — Pydantic models for HTTP I/O (`SimState`, `SimStart/StopRequest/Response`, `OverrideRequest/Response`, `PredictRequest/Response`, `NetworkInfo`, `TankInfo`).
+
+Keep these layers separate — the runner must not depend on Pydantic, and the routers must not return dataclasses.
+
+---
+
+## Simulator (`app/simulation/Simulator.py`)
+
+Context manager around `epyt.epanet`. On construction, downloads `WSN1.inp` from the Supabase `network` bucket into a temp directory.
 
 | Method | Description |
 |---|---|
-| `load()` | Opens the downloaded `.inp`, extracts base demands, returns self |
-| `seed(days=4)` | Runs a full EPS at 1-hour steps; inserts all node + link rows to Supabase in 500-row chunks; returns `run_id` (UUID) |
-| `run_24_hour_cycle()` | Runs one 24-hour cycle at 15-min steps with a fresh `DemandPattern` and randomized base demands per call; inserts one snapshot per step to `live_*` tables; returns `cycle_id` (UUID) |
-| `close()` | Unloads epyt and removes the temp directory |
-
-`main.py` loops `run_24_hour_cycle()` indefinitely until `KeyboardInterrupt`.
-
-> ⚠ **Supabase setup required before first run:** upload `WSN1.inp` to the `network` bucket in Supabase Storage, or `EPANETSimulator.__init__` will raise `RuntimeError`.
-
-### DemandPattern (`Pattern.py`)
-
-Generates a 96-step (15-min resolution, 24-hour) sinusoidal demand multiplier array. Each instance applies per-step lognormal noise via `Randomizer.randomize_pattern()`, so every cycle gets a unique pattern. Multiplier range: ~[0.4, 1.4], peak at t=6 h.
-
-### Randomizer (`Randomizer.py`)
-
-Two static methods sharing `σ=0.15, μ=−σ²/2` (zero-bias lognormal):
-
-- `randomize_base_demands(base_demands)` — per-node multiplier; returns new list
-- `randomize_pattern(pattern)` — per-step multiplier on a numpy array; returns new array
+| `load()` | Open the network, extract category-1 base demands. Returns self (also called by `__enter__`). |
+| `seed(days=4)` | Run a full EPS at **1-hour** steps using `getComputedHydraulicTimeSeries`, insert into `seed_*` tables in 500-row chunks. Returns `run_id`. Used for offline data generation, **not** by the web app. |
+| `start_simulation()` | Configure 15-min steps, set duration to 365 days, open + initialize hydraulic analysis. Returns `sim_id`. |
+| `read_state()` | Snapshot tank levels (`head − elevation`) and pump *commanded* statuses (via `getLinkStatus`, not `getLinkPumpState`). No I/O. |
+| `apply_pump_commands(dict)` | `setLinkStatus` for each pump set to `OPEN`/`CLOSED`. `NOP` (or missing) is skipped, leaving the .inp `[RULES]` in charge for that pump. |
+| `step()` | `runHydraulicAnalysis` → `nextHydraulicAnalysisStep`. Returns full `StepResult`. Raises `StopIteration` if EPANET reports `tstep ≤ 0`. |
+| `rotate_demand_pattern()` | Install a fresh lognormal 96-step pattern (`σ=0.10`) named `DMA_AUTO` and re-randomize base demands (`σ=0.15`, zero-bias). Called on day boundaries. |
+| `stop_simulation()` | Close hydraulic analysis. Safe no-op if not started. |
+| `compute_network_info()` | Static topology stats → dict matching `NetworkInfo` schema. Safe to call before `start_simulation()`. **Assumes US units (ft / GPM)** — true for WSN1; non-US `.inp` files would need a `getFlowUnits()` guard. |
+| `render_plot_svg()` | Render the network with `epyt.plot()` → matplotlib SVG. Returns `(svg_str, geometry)` where `geometry` includes `svg_width/height`, per-node `{id, type, x, y}` (post Y-flip, in SVG points at dpi=72), and per-link `{id, type, from, to}` for client-side hit-testing. |
+| `close()` | Unload epyt, delete tempdir. |
 
 ---
 
 ## SupabaseDB (`app/db/SupabaseClient.py`)
 
-Singleton pattern; credentials from `.env`. All DB operations must use this class — never instantiate `supabase.create_client` elsewhere.
+Singleton; credentials from `.env`. All DB and storage I/O goes through this class — never call `supabase.create_client` elsewhere.
 
-**Storage:**
+**Storage:** `network` bucket holds `WSN1.inp`. `download_network()` / `save_network(bytes)`.
 
-| Bucket | File | Used by |
-|---|---|---|
-| `network` | `WSN1.inp` | `EPANETSimulator.__init__` downloads this on every construction |
-
-**Database tables:**
+**Tables:**
 
 | Table | Key columns |
 |---|---|
-| `network_state` | `tank_id`, `level_ft`, `updated_at` |
 | `seed_node_results` | `run_id`, `sim_hour`, `node_id`, `pressure_psi`, `head_ft`, `demand_gpm` |
 | `seed_link_results` | `run_id`, `sim_hour`, `link_id`, `flow_gpm`, `velocity_fps`, `headloss_ft_per_kft` |
 | `live_node_results` | same schema as `seed_node_results` |
 | `live_link_results` | same schema as `seed_link_results` |
+| `control_decisions` | `sim_id`, `sim_time_hr`, `pump_id`, `ml_commanded`, `applied_status`, `mode`, `model_id`, `current_price`, `explanation` (XAI audit trail) |
+
+**Methods:** `insert_seed_node_results`, `insert_seed_link_results`, `insert_live_node_results`, `insert_live_link_results`, `insert_control_decision`, `clear_live_tables` (debug-only — wipes `live_*` and `control_decisions`).
 
 Use the MCP Supabase connection in Claude Code for schema inspection, migrations, and SQL queries during development.
 
 ---
 
-## Planned API Endpoints (not yet implemented)
+## HTTP API
 
-- `POST /upload` — accept `.inp` file, run EPANETSimulator, persist to Supabase
-- `GET /pump-control` — run pump control ML model, return decision + SHAP values
-- `GET /prediction` — run ensemble forecast, return per-node predictions
-- `GET /network-plot` — call `epyt` `.plot()`, return image
+### Simulation control (`/sim/*`)
+
+| Endpoint | Notes |
+|---|---|
+| `POST /sim/start` | Body: `SimStartRequest(time_scale)`. 409 if already running. Returns `sim_id`. |
+| `POST /sim/stop` | 409 if not running. Returns `last_sim_hr`. |
+| `POST /sim/reset` | Stop (if running) then start. Returns new `sim_id`. |
+| `GET /sim/state` | Last cached snapshot (no lock — readers don't block ticks). |
+| `GET /sim/stream` | SSE. Initial snapshot, then one event per tick. Heartbeat `: ping` every 15s. |
+| `POST /sim/override` | `{pump_id, mode}`. Effective next tick. Allowed in any state. |
+| `GET /sim/overrides` | Current pump_modes map. |
+
+### ML (`/ml/*`)
+
+`POST /ml/predict` is a **stub**: returns `NOP` for every pump, deferring fully to the `[RULES]` defined in the .inp. `model_id="stub-v0"`. To be replaced after the ML brainstorm.
+
+Command vocabulary: `"OPEN"` / `"CLOSED"` apply `setLinkStatus` and force the pump (overriding the network's rules for that step); `"NOP"` means "no opinion" — the runner skips `setLinkStatus` and the .inp `[RULES]` govern. `HAND_OPEN`/`HAND_CLOSED` overrides always emit OPEN/CLOSED (rules can't push back against the human).
+
+### Network (`/network/*`)
+
+`GET /network/info` → `NetworkInfo`. `GET /network/plot.svg` → cached SVG with `image/svg+xml`.
+
+### Pages
+
+`GET /` (overview), `GET /pump-control`, `GET /xai`. All Jinja2. `GET /healthz` returns `{"status": "ok"}`.
 
 ---
 
-## Frontend Structure
+## Frontend
 
-Three navigational sections rendered via Jinja2 templates:
+Three nav sections rendered via Jinja2; only the overview page is currently wired up beyond the nav shell.
 
-### 1. Overview
-- **Project import**: upload a `.inp` file; parse and store network topology in Supabase.
-- **Network visualisation**: render imported network via `epyt` `.plot()` as embedded image.
-- **General information panel**: summary statistics (junction count, pipe count, total demand, etc.).
+### Overview (implemented)
 
-### 2. Pump Control
-- **AI decision dashboard**: current pump scheduling decision from the ML pump control model.
-- **XAI breakdown**: SHAP waterfall or bar chart showing which features drove the decision.
-- **Decision history**: table/timeline of past pump commands with XAI justifications.
+- Static network SVG rendered server-side via `epyt.plot()`, served from `/network/plot.svg`, embedded in the page.
+- `overview.js` opens an `EventSource` on `/sim/stream`. On each event: update tank fullness bars, pump status pills, pressure overlays, and the start/stop button. SVG geometry from `app.state.network_geometry` is passed to the client as JSON for hit-testing nodes/links without re-parsing the SVG.
+- Static topology stats panel (junctions, pipes, total demand, etc.) hydrated from `/network/info`.
 
-### 3. Prediction
-- **ML ensemble predictions**: pressure, demand, and head forecasts from XGBoost, MLP, GAM, EBM.
-- **Per-node and per-link views**: selectable node/link showing time-series forecast vs. actuals.
-- **Model performance metrics**: RMSE, R², MSE per model.
+### Pump Control (placeholder)
+
+- AI decision dashboard, SHAP breakdown, decision history. Currently a navigation shell only.
+
+### XAI / Prediction (placeholder)
+
+- ML ensemble predictions, per-node/link time-series, model performance metrics. Currently a navigation shell only.
 
 ---
 
-## Data Flow Architecture
+## Offline ML pipeline (`app/data/EPANET Analysis.ipynb`)
+
+Separate from the live web loop. Uses pre-parsed `WSN1 - report.txt`:
 
 ```
-WSN1.inp (in Supabase 'network' bucket)
+WSN1 - report.txt
     │
-    └── EPANETSimulator
-          ├── seed()            → seed_node_results / seed_link_results (1-hr steps)
-          └── run_24_hour_cycle() → live_node_results / live_link_results (15-min steps)
-                  │
-                  DemandPattern (sinusoidal + lognormal noise, 96 steps)
-                  Randomizer    (lognormal noise on base demands)
-
-WSN1 - report.txt (pre-parsed node/link results)
+    ▼ regex parser
+JunctionPressures (~743k rows: node × timestep)
+LinkResults (~1M rows)
     │
-    ▼
-Regex parser in EPANET Analysis.ipynb
-→ JunctionPressures DataFrame (743k rows: node × timestep)
-→ LinkResults DataFrame (1M rows: link × timestep)
+    ▼ feature engineering
+- Merge PATTERN-0 demand multipliers (0.5-hr steps, 96-hr window)
+- Lag features: [1, 2, 3, 6, 24] for Demand, Head, Pressure
+- Derived: Demand_to_Elev_ratio
     │
-    ▼
-Feature Engineering
-→ Merge PATTERN-0 demand multipliers (0.5-hr steps, 96-hr window)
-→ Lag features: lags [1, 2, 3, 6, 24] for Demand, Head, Pressure
-→ Derived feature: Demand_to_Elev_ratio
+    ▼ temporal split: hours ≤ 35 train, > 35 test (first 24 hrs dropped per node)
     │
-    ▼
-Temporal train/test split: hours ≤ 35 train, hours > 35 test
-(first 24 hrs dropped per node due to lag NaNs)
+    ▼ sklearn Pipeline: OneHotEncoder('Node') + MultiOutputRegressor
+Targets: Pressure [psi], Demand, Head
+Models:  XGBoost | MLP | GAM | EBM
     │
-    ▼
-sklearn Pipeline: OneHotEncoder('Node') + MultiOutputRegressor
-→ Targets: Pressure [psi], Demand, Head
-→ Models: XGBoost | MLP | GAM | EBM
-    │
-    ▼
-Evaluation: RMSE, R², MSE (overall + per-node)
-Explainability: SHAP values + permutation importance (pressure target)
+    ▼ evaluation: RMSE, R², MSE (overall + per-node)
+    ▼ explainability: SHAP + permutation importance (pressure target)
 ```
 
-> ⚠ Known bug in the notebook: `JunctionPressures` uses column `'Node-ID'` but the merge calls `on='Node'`. Fix by renaming the column or updating the merge key before `pd.merge`.
+> ⚠ Known bug in the notebook: `JunctionPressures` uses column `'Node-ID'` but the merge calls `on='Node'`. Rename the column or update the merge key before `pd.merge`.
 
 ---
 
 ## EPANET Network Details
 
-- Simulation pattern: **PATTERN-0**, 96-hour window, 0.5-hr timestep (seed mode); 15-min timestep (live mode)
-- Flow units: GPM; headloss formula: Hazen-Williams
-- Report fields captured: STATUS, SUMMARY, NODES ALL, LINKS ALL, PRESSURE, HEAD, DEMAND, FLOW, VELOCITY, HEADLOSS
-- Total system demand: ~1.3 MGD (~4.9 million L/day)
+- Live mode: 15-min timestep, 1-year duration (continuous; restart if exceeded).
+- Seed mode: 1-hour timestep, N-day duration.
+- Flow units: GPM. Headloss formula: Hazen-Williams.
+- Report fields: STATUS, SUMMARY, NODES ALL, LINKS ALL, PRESSURE, HEAD, DEMAND, FLOW, VELOCITY, HEADLOSS.
+- Total system demand: ~1.3 MGD (~4.9 million L/day).

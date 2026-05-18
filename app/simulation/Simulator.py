@@ -1,6 +1,6 @@
 """
 Usage:
-    from simulation.Simulator import EPANETSimulator
+    from app.simulation.Simulator import EPANETSimulator
 
     # Seed 3 days of data as fast as possible:
     with EPANETSimulator() as sim:
@@ -17,6 +17,7 @@ Usage:
         sim.stop_simulation()
 """
 
+import io
 import shutil
 import tempfile
 import uuid
@@ -26,8 +27,8 @@ import numpy as np
 
 from epyt import epanet
 
-from db.SupabaseClient import SupabaseDB
-from simulation.types import StepResult, StepState
+from app.db.SupabaseClient import SupabaseDB
+from app.simulation.types import StepResult, StepState
 
 
 class EPANETSimulator:
@@ -209,6 +210,169 @@ class EPANETSimulator:
             tank_levels=tank_levels,
             pump_states=pump_states,
         )
+
+    def compute_network_info(self) -> dict:
+        """
+        Static topology stats. Computed once per network load; safe to call
+        before start_simulation(). Returns plain dict so the api layer can
+        wrap it in a Pydantic NetworkInfo without creating a layering dep.
+        """
+        if self._network is None:
+            raise RuntimeError("Network not loaded. Call load() first.")
+
+        n = self._network
+        junction_ids  = n.getNodeJunctionNameID()
+        tank_ids      = n.getNodeTankNameID()
+        reservoir_ids = n.getNodeReservoirNameID()
+        pump_ids      = n.getLinkPumpNameID()
+        valve_ids     = n.getLinkValveNameID()
+        pipe_ids      = n.getLinkPipeNameID()
+
+        # getLinkLength returns lengths for ALL links (pipes, pumps, valves) in feet.
+        # Pumps and valves have length 0, so summing all is fine.
+        # NOTE: Assumes US units (feet/GPM) — true for WSN1. Non-US .inp files would
+        # need a flow-units check via getFlowUnits() before using these field names.
+        total_length_ft = float(sum(n.getLinkLength()))
+
+        # base demands across all junctions (category 1)
+        base_demands = list(n.getNodeBaseDemands()[1])
+        total_demand_gpm = float(sum(base_demands))
+
+        pattern_step_sec = int(n.getTimePatternStep())
+        # Use the first pattern's length to derive pattern_steps. If no pattern,
+        # default to 96 (24h at 15min).
+        try:
+            pattern_lengths = n.getPatternLengths()
+            pattern_steps = int(pattern_lengths[0]) if len(pattern_lengths) else 96
+        except (AttributeError, IndexError, TypeError) as exc:
+            print(f"[network_info] WARN: getPatternLengths failed ({exc!r}); defaulting pattern_steps=96")
+            pattern_steps = 96
+
+        tanks_info: dict[str, dict] = {}
+        try:
+            tank_min = n.getNodeTankMinimumWaterLevel()
+            tank_max = n.getNodeTankMaximumWaterLevel()
+            tank_dia = n.getNodeTankDiameter()
+            # epyt returns these as flat arrays indexed by tank order (NOT node order)
+            for i, tid in enumerate(tank_ids):
+                tanks_info[str(tid)] = {
+                    "min_level_ft": float(tank_min[i]),
+                    "max_level_ft": float(tank_max[i]),
+                    "diameter_ft":  float(tank_dia[i]),
+                }
+        except Exception as exc:
+            print(f"[network_info] WARN: tank-detail accessors failed ({exc!r}); tanks={{}}")
+
+        return {
+            "junction_count":       len(junction_ids),
+            "tank_count":           len(tank_ids),
+            "reservoir_count":      len(reservoir_ids),
+            "pump_count":           len(pump_ids),
+            "valve_count":          len(valve_ids),
+            "pipe_count":           len(pipe_ids),
+            "total_pipe_length_mi": total_length_ft / 5280.0,
+            "total_demand_gpm":     total_demand_gpm,
+            "total_demand_mgd":     total_demand_gpm * 1440.0 / 1_000_000.0,
+            "pattern_steps":        pattern_steps,
+            "pattern_period_min":   pattern_step_sec // 60,
+            "tanks":                tanks_info,
+        }
+
+    def render_plot_svg(self) -> tuple[str, dict]:
+        """
+        Render the network via epyt as an SVG string and return it alongside a
+        geometry map. The geometry contains each node's pixel position inside the
+        SVG (post Y-flip) and each link's type + endpoint node IDs, so the client
+        can hit-test nodes (point distance) and links (point-to-segment distance)
+        without parsing the SVG.
+
+        Returns (svg_str, geometry) where geometry has keys:
+            svg_width, svg_height,
+            nodes: [{id, type: "junction"|"tank"|"reservoir", x, y}, ...]
+            links: [{id, type: "pipe"|"pump"|"valve", from, to}, ...]
+        """
+        if self._network is None:
+            raise RuntimeError("Network not loaded. Call load() first.")
+
+        import matplotlib
+        matplotlib.use("Agg", force=False)
+        import matplotlib.pyplot as plt
+
+        fig = self._network.plot()
+        if fig is None:
+            fig = plt.gcf()
+
+        # Pin dpi to 72 so display pixels == SVG user units == viewBox points.
+        # Avoids any pixel↔point conversion when mapping transData → SVG coords.
+        fig.set_dpi(72)
+        fig.set_size_inches(12, 9)
+        ax = fig.gca()
+        fig.canvas.draw()
+
+        n = self._network
+        node_ids = list(n.getNodeNameID())
+        coords = n.getNodeCoordinates()  # {'x': {1: ...}, 'y': {1: ...}, ...}
+
+        tank_set      = set(n.getNodeTankNameID())
+        reservoir_set = set(n.getNodeReservoirNameID())
+        pump_set      = set(n.getLinkPumpNameID())
+        valve_set     = set(n.getLinkValveNameID())
+
+        # With dpi=72 pinned above, display pixels == SVG points 1:1.
+        svg_w_pt = float(fig.get_size_inches()[0] * 72.0)
+        svg_h_pt = float(fig.get_size_inches()[1] * 72.0)
+
+        data_pts = [(float(coords['x'][i + 1]), float(coords['y'][i + 1]))
+                    for i in range(len(node_ids))]
+        display_pts = ax.transData.transform(data_pts)
+
+        nodes = []
+        for nid, (dx, dy) in zip(node_ids, display_pts):
+            if nid in tank_set:
+                node_type = "tank"
+            elif nid in reservoir_set:
+                node_type = "reservoir"
+            else:
+                node_type = "junction"
+            nodes.append({
+                "id": str(nid),
+                "type": node_type,
+                "x": float(dx),
+                # SVG Y origin is top-left; matplotlib is bottom-left
+                "y": svg_h_pt - float(dy),
+            })
+
+        link_ids = list(n.getLinkNameID())
+        # getNodesConnectingLinksID returns [[from_id, to_id], ...] as strings.
+        link_endpoints = n.getNodesConnectingLinksID()
+        links = []
+        for lid, endpoints in zip(link_ids, link_endpoints):
+            from_id, to_id = str(endpoints[0]), str(endpoints[1])
+            if lid in pump_set:
+                link_type = "pump"
+            elif lid in valve_set:
+                link_type = "valve"
+            else:
+                link_type = "pipe"
+            links.append({
+                "id": str(lid),
+                "type": link_type,
+                "from": from_id,
+                "to": to_id,
+            })
+
+        buf = io.StringIO()
+        # NO bbox_inches="tight" — would crop the SVG and shift the coords above.
+        fig.savefig(buf, format="svg")
+        plt.close(fig)
+
+        geometry = {
+            "svg_width":  svg_w_pt,
+            "svg_height": svg_h_pt,
+            "nodes":      nodes,
+            "links":      links,
+        }
+        return buf.getvalue(), geometry
 
     def apply_pump_commands(self, commands: dict[str, str]) -> None:
         """

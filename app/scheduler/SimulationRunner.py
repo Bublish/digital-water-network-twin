@@ -22,7 +22,7 @@ from typing import Any
 
 import httpx
 
-from simulation.types import PumpMode, SimStatus, StepResult, StepState
+from app.simulation.types import PumpMode, SimStatus, StepResult, StepState
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +56,7 @@ class SimulationRunner:
         self._last_ml_commands: dict[str, str] | None = None
         self._hydraulic_failures: int = 0
         self._last_sim_hr: float = 0.0
+        self._subscribers: set[asyncio.Queue] = set()
 
     # ---------------- public accessors ----------------
 
@@ -78,6 +79,32 @@ class SimulationRunner:
         """
         self._pump_modes[pump_id] = mode
         return dict(self._pump_modes)
+
+    def subscribe(self, q: asyncio.Queue) -> None:
+        """Register a queue to receive cached_state dicts after each tick."""
+        self._subscribers.add(q)
+
+    def unsubscribe(self, q: asyncio.Queue) -> None:
+        """Remove a queue from the broadcast set. Safe if not registered."""
+        self._subscribers.discard(q)
+
+    def _broadcast(self, state: dict) -> None:
+        """Push state to every subscriber. Drop for slow consumers (no blocking)."""
+        for q in list(self._subscribers):
+            try:
+                q.put_nowait(state)
+            except asyncio.QueueFull:
+                pass
+
+    def _broadcast_status(self) -> None:
+        """Broadcast a state event reflecting the current status. Used when the
+        runner self-stops (no fresh StepResult to broadcast)."""
+        if self._cached_state is None:
+            state = self.get_cached_state()
+        else:
+            state = dict(self._cached_state)
+            state["status"] = self._status.value
+        self._broadcast(state)
 
     def _resolve_overrides(self, ml_commands: dict[str, str]) -> dict[str, str]:
         """HAND_OPEN/HAND_CLOSED win over the ML command; AUTO uses ML."""
@@ -117,6 +144,7 @@ class SimulationRunner:
             return
 
         self._status = SimStatus.STOPPED
+        self._broadcast_status()
         if self._tick_task:
             self._tick_task.cancel()
             try:
@@ -143,6 +171,7 @@ class SimulationRunner:
         except Exception:
             logger.exception("Tick loop crashed; stopping runner.")
             self._status = SimStatus.STOPPED
+            self._broadcast_status()
 
     async def tick(self) -> None:
         if self._status != SimStatus.RUNNING:
@@ -170,6 +199,7 @@ class SimulationRunner:
             except StopIteration:
                 logger.error("EPANET reached end of simulation duration.")
                 self._status = SimStatus.STOPPED
+                self._broadcast_status()
                 return
             except Exception:
                 self._hydraulic_failures += 1
@@ -177,6 +207,7 @@ class SimulationRunner:
                                  f"(failure #{self._hydraulic_failures}/{HYDRAULIC_RETRY_LIMIT})")
                 if self._hydraulic_failures >= HYDRAULIC_RETRY_LIMIT:
                     self._status = SimStatus.STOPPED
+                    self._broadcast_status()
                 return
 
             # 6. Persist
@@ -184,6 +215,7 @@ class SimulationRunner:
 
             # 7. Cache state for GET /sim/state
             self._cached_state = self._build_cached_state(result)
+            self._broadcast(self._cached_state)
             self._last_sim_hr = result.sim_time_sec / 3600.0
             self._step_idx += 1
 
@@ -256,6 +288,8 @@ class SimulationRunner:
             "tank_levels":  result.tank_levels,
             "pump_states":  result.pump_states,
             "pump_modes":   {p: m.value for p, m in self._pump_modes.items()},
+            "pressures":    result.pressures,
+            "flows":        result.flows,
             "last_step_at": _now_iso(),
         }
 
@@ -270,6 +304,8 @@ class SimulationRunner:
                 "tank_levels":  {},
                 "pump_states":  {},
                 "pump_modes":   {p: m.value for p, m in self._pump_modes.items()},
+                "pressures":    {},
+                "flows":        {},
                 "last_step_at": None,
             }
         return dict(self._cached_state)

@@ -7,7 +7,7 @@ Plain-Python types used inside the simulator live in simulation/types.py.
 from datetime import datetime
 from pydantic import BaseModel, Field
 
-from simulation.types import PumpMode, SimStatus
+from app.simulation.types import PumpMode, SimStatus
 
 
 class SimStartRequest(BaseModel):
@@ -37,6 +37,8 @@ class SimState(BaseModel):
     tank_levels:   dict[str, float] = {}
     pump_states:   dict[str, str]   = {}
     pump_modes:    dict[str, PumpMode] = {}
+    pressures:     dict[str, float] = Field(default_factory=dict)
+    flows:         dict[str, float] = Field(default_factory=dict)
     last_step_at:  datetime | None = None
 
 
@@ -63,3 +65,24 @@ class PredictResponse(BaseModel):
     commands:    dict[str, str]            # pump_id -> "OPEN"|"CLOSED"
     model_id:    str
     explanation: dict | None = None
+
+
+class TankInfo(BaseModel):
+    min_level_ft:  float
+    max_level_ft:  float
+    diameter_ft:   float
+
+
+class NetworkInfo(BaseModel):
+    junction_count:        int
+    tank_count:            int
+    reservoir_count:       int
+    pump_count:            int
+    valve_count:           int
+    pipe_count:            int
+    total_pipe_length_mi:  float
+    total_demand_gpm:      float
+    total_demand_mgd:      float
+    pattern_steps:         int
+    pattern_period_min:    int
+    tanks:                 dict[str, TankInfo] = {}

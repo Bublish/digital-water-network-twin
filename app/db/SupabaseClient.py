@@ -86,3 +86,20 @@ class SupabaseDB:
     def insert_control_decision(self, rows: list[dict]) -> None:
         """Insert one row per pump per step into control_decisions (XAI audit table)."""
         self._client.table("control_decisions").insert(rows).execute()
+
+    # ------------------------------------------------------------------
+    # DEBUG ONLY: live-table cleanup
+    # ------------------------------------------------------------------
+
+    def clear_live_tables(self) -> None:
+        """
+        DEBUG ONLY: delete all rows from the live_* and control_decisions tables.
+        Call this on shutdown during dev so test runs don't accumulate.
+        REMOVE THIS METHOD CALL FROM lifespan() BEFORE GOING TO PRODUCTION.
+        """
+        # Supabase requires a filter on delete; UUID '00000000-...' won't match real data,
+        # and .neq('...') matches everything. We use a sim_hour filter for live_* tables
+        # (sim_hour is non-negative for real rows) and run_id filter on others.
+        self._client.table("live_node_results").delete().gte("sim_hour", -1).execute()
+        self._client.table("live_link_results").delete().gte("sim_hour", -1).execute()
+        self._client.table("control_decisions").delete().gte("sim_time_hr", -1).execute()

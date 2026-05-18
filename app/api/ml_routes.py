@@ -6,7 +6,7 @@ The point is to make the end-to-end loop work — not to be smart.
 """
 from fastapi import APIRouter
 
-from api.schemas import PredictRequest, PredictResponse
+from app.api.schemas import PredictRequest, PredictResponse
 
 router = APIRouter()
 

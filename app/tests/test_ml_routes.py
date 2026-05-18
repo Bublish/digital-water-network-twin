@@ -3,7 +3,7 @@ from fastapi.testclient import TestClient
 
 
 def make_app():
-    from api.ml_routes import router as ml_router
+    from app.api.ml_routes import router as ml_router
     app = FastAPI()
     app.include_router(ml_router)
     return app

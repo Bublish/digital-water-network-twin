@@ -16,7 +16,7 @@ pytestmark = pytest.mark.skipif(
 
 @pytest.fixture
 def sim():
-    from simulation.Simulator import EPANETSimulator
+    from app.simulation.Simulator import EPANETSimulator
     with EPANETSimulator() as s:
         yield s
 
@@ -47,7 +47,7 @@ def test_rotate_demand_pattern_installs_96_step_pattern(sim):
 
 
 def test_read_state_returns_step_state(sim):
-    from simulation.types import StepState
+    from app.simulation.types import StepState
     sim.start_simulation()
     sim.rotate_demand_pattern()
     state = sim.read_state()
@@ -72,7 +72,7 @@ def test_apply_pump_commands_changes_pump_status(sim):
 
 
 def test_step_advances_sim_time_and_returns_step_result(sim):
-    from simulation.types import StepResult
+    from app.simulation.types import StepResult
     sim.start_simulation()
     sim.rotate_demand_pattern()
     t0 = sim.read_state().sim_time_sec
@@ -82,3 +82,41 @@ def test_step_advances_sim_time_and_returns_step_result(sim):
     assert len(result.pressures) > 0
     assert len(result.flows) > 0
     sim.stop_simulation()
+
+
+def test_compute_network_info_returns_expected_counts():
+    """Hits the real WSN1 network — requires Supabase + WSN1.inp upload."""
+    from app.simulation.Simulator import EPANETSimulator
+
+    with EPANETSimulator() as sim:
+        info = sim.compute_network_info()
+
+    assert info["pump_count"] == 2
+    assert info["tank_count"] == 2
+    assert info["reservoir_count"] == 1
+    assert 120 < info["junction_count"] < 140      # WSN1 has ~130 junctions
+    assert 100 < info["pipe_count"] < 250          # WSN1 has ~168 pipes; bound generously
+    assert 20.0 < info["total_pipe_length_mi"] < 30.0   # WSN1: 23.3 miles
+    assert info["total_demand_gpm"] > 0
+    assert info["total_demand_mgd"] == pytest.approx(
+        info["total_demand_gpm"] * 1440 / 1_000_000, rel=1e-6
+    )
+    assert info["pattern_steps"] > 0
+    assert info["pattern_period_min"] > 0
+    assert "tanks" in info
+    assert len(info["tanks"]) == 2
+    for tid, t in info["tanks"].items():
+        assert t["min_level_ft"] >= 0
+        assert t["max_level_ft"] > t["min_level_ft"]
+        assert t["diameter_ft"] > 0
+
+
+def test_render_plot_png_returns_png_bytes():
+    from app.simulation.Simulator import EPANETSimulator
+
+    with EPANETSimulator() as sim:
+        png = sim.render_plot_png()
+
+    # PNG file signature: 89 50 4E 47 0D 0A 1A 0A
+    assert png.startswith(b"\x89PNG\r\n\x1a\n")
+    assert len(png) > 1000  # not an empty/header-only file

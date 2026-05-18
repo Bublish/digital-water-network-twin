@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+{% block title %}Overview — WSN1 SCADA{% endblock %}
+{% block content %}
+
+<section class="card" id="sim-control">
+  <h2>Simulation Control</h2>
+  <div class="sim-status-row">
+    Status:
+    <span id="sim-status" class="status status-{{ initial_sim_state.status|lower }}">
+      {{ initial_sim_state.status }}
+    </span>
+    &nbsp;sim_id: <code id="sim-id">{{ initial_sim_state.sim_id or '—' }}</code>
+    &nbsp;t = <span id="sim-time">{{ "%.2f"|format(initial_sim_state.sim_time_hr) }}</span> hr
+  </div>
+  <div class="sim-controls-row">
+    <label>time_scale:
+      <input type="number" id="time-scale" min="1" max="100000"
+             value="{{ initial_sim_state.time_scale }}">
+    </label>
+    <button id="btn-start">Start</button>
+    <button id="btn-stop">Stop</button>
+    <button id="btn-reset">Reset</button>
+  </div>
+  <div id="error-banner" class="error-banner" hidden></div>
+</section>
+
+<section class="card" id="live-state">
+  <h2>Live State &amp; Pump Overrides</h2>
+  <div class="two-col">
+    <div>
+      <h3>Tanks</h3>
+      <ul id="tank-list" class="data-list">
+        {% for tid, level in initial_sim_state.tank_levels.items() %}
+          {% set tank = network_info.tanks.get(tid) %}
+          <li data-tank-id="{{ tid }}"
+              data-tank-min="{{ tank.min_level_ft if tank else 0 }}"
+              data-tank-max="{{ tank.max_level_ft if tank else 1 }}">
+            <div class="tank-row-text">
+              <span class="row-id">{{ tid }}</span>
+              <span class="tank-level">{{ "%.1f"|format(level) }}</span>&nbsp;/&nbsp;<span class="tank-max">{{ "%.0f"|format(tank.max_level_ft if tank else 0) }}</span>&nbsp;ft
+            </div>
+            <div class="tank-bar"><div class="tank-fill" style="width: 0%"></div></div>
+          </li>
+        {% endfor %}
+      </ul>
+    </div>
+    <div>
+      <h3>Pumps</h3>
+      <ul id="pump-list" class="data-list">
+        {% for pid, mode in initial_sim_state.pump_modes.items() %}
+          <li data-pump-id="{{ pid }}">
+            <span class="row-id">{{ pid }}</span>
+            <span class="pump-state status status-{{ initial_sim_state.pump_states.get(pid, 'closed')|lower }}">
+              {{ initial_sim_state.pump_states.get(pid, '—') }}
+            </span>
+            <label><input type="radio" name="mode-{{ pid }}" value="AUTO"        {% if mode == 'AUTO'        %}checked{% endif %}> AUTO</label>
+            <label><input type="radio" name="mode-{{ pid }}" value="HAND_OPEN"   {% if mode == 'HAND_OPEN'   %}checked{% endif %}> HAND_OPEN</label>
+            <label><input type="radio" name="mode-{{ pid }}" value="HAND_CLOSED" {% if mode == 'HAND_CLOSED' %}checked{% endif %}> HAND_CLOSED</label>
+          </li>
+        {% endfor %}
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section class="card" id="network">
+  <h2>Network</h2>
+  <div class="two-col">
+    <div class="network-plot-wrap">
+      <div id="network-plot" class="network-plot">
+        {{ network_plot_svg|safe }}
+      </div>
+      <div id="network-tooltip" class="network-tooltip" hidden></div>
+      <button type="button" id="network-reset" title="Reset view">Reset</button>
+    </div>
+    <dl class="network-info">
+      <dt>Junctions</dt>    <dd>{{ network_info.junction_count }}</dd>
+      <dt>Tanks</dt>        <dd>{{ network_info.tank_count }}</dd>
+      <dt>Reservoirs</dt>   <dd>{{ network_info.reservoir_count }}</dd>
+      <dt>Pumps</dt>        <dd>{{ network_info.pump_count }}</dd>
+      <dt>Valves</dt>       <dd>{{ network_info.valve_count }}</dd>
+      <dt>Pipes</dt>        <dd>{{ network_info.pipe_count }} ({{ "%.1f"|format(network_info.total_pipe_length_mi) }} mi)</dd>
+      <dt>Total demand</dt> <dd>{{ "%.0f"|format(network_info.total_demand_gpm) }} GPM ({{ "%.2f"|format(network_info.total_demand_mgd) }} MGD)</dd>
+      <dt>Pattern</dt>      <dd>{{ network_info.pattern_steps }} steps × {{ network_info.pattern_period_min }} min</dd>
+    </dl>
+  </div>
+</section>
+
+{% endblock %}
+
+{% block scripts %}
+  <script type="application/json" id="network-geometry">{{ network_geometry_json|safe }}</script>
+  <script src="/static/js/overview.js"></script>
+{% endblock %}

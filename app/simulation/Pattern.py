@@ -1,7 +1,7 @@
 import numpy as np
 import datetime
 import time
-from simulation.Randomizer import Randomizer
+from app.simulation.Randomizer import Randomizer
 
 
 class DemandPattern:

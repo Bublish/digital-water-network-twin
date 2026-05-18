@@ -51,7 +51,8 @@ def test_app():
             "T2": {"min_level_ft": 0.0, "max_level_ft": 35.0, "diameter_ft": 50.0},
         },
     }
-    fake_sim.render_plot_png.return_value = b"\x89PNG\r\n\x1a\n" + b"\x00" * 2000
+    fake_sim.current_pattern_id = None
+    fake_sim.current_pattern_multipliers.return_value = []
     fake_db = MagicMock()
 
     @asynccontextmanager
@@ -65,7 +66,11 @@ def test_app():
             ml_url="http://testserver/ml/predict",
         )
         app.state.network_info = fake_sim.compute_network_info()
-        app.state.network_plot_png = fake_sim.render_plot_png()
+        _svg_stub = "<svg xmlns='http://www.w3.org/2000/svg'/>"
+        app.state.network_plot_svg_light = _svg_stub
+        app.state.network_plot_svg_dark  = _svg_stub
+        app.state.network_plot_svg       = _svg_stub
+        app.state.network_geometry = {"svg_width": 100, "svg_height": 100, "nodes": [], "links": []}
         from fastapi.templating import Jinja2Templates
         from pathlib import Path
         templates_dir = Path(__file__).resolve().parent.parent / "web" / "templates"
@@ -145,12 +150,12 @@ def test_get_network_info(test_app):
         assert body["junction_count"] == 130
 
 
-def test_get_network_plot_png(test_app):
+def test_get_network_plot_svg(test_app):
     with TestClient(test_app) as client:
-        r = client.get("/network/plot.png")
+        r = client.get("/network/plot.svg")
         assert r.status_code == 200
-        assert r.headers["content-type"] == "image/png"
-        assert r.content.startswith(b"\x89PNG")
+        assert r.headers["content-type"].startswith("image/svg+xml")
+        assert r.text.lstrip().startswith("<svg")
 
 
 async def _read_first_sse_event(app, path: str = "/sim/stream", timeout: float = 5.0) -> dict:

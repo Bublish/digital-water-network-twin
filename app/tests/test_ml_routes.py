@@ -9,7 +9,7 @@ def make_app():
     return app
 
 
-def test_predict_returns_open_when_tank_below_threshold():
+def test_predict_defers_to_network_rules_when_tank_low():
     client = TestClient(make_app())
     resp = client.post("/ml/predict", json={
         "sim_time_hr": 6.0,
@@ -20,10 +20,10 @@ def test_predict_returns_open_when_tank_below_threshold():
     assert resp.status_code == 200
     body = resp.json()
     assert body["model_id"] == "stub-v0"
-    assert body["commands"] == {"P1": "OPEN", "P2": "OPEN"}
+    assert body["commands"] == {"P1": "NOP", "P2": "NOP"}
 
 
-def test_predict_returns_closed_when_tanks_full():
+def test_predict_defers_to_network_rules_when_tanks_full():
     client = TestClient(make_app())
     resp = client.post("/ml/predict", json={
         "sim_time_hr": 14.0,
@@ -31,4 +31,4 @@ def test_predict_returns_closed_when_tanks_full():
         "pump_modes":  {"P1": "AUTO", "P2": "AUTO"},
     })
     body = resp.json()
-    assert body["commands"] == {"P1": "CLOSED", "P2": "CLOSED"}
+    assert body["commands"] == {"P1": "NOP", "P2": "NOP"}

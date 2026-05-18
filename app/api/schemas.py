@@ -39,7 +39,21 @@ class SimState(BaseModel):
     pump_modes:    dict[str, PumpMode] = {}
     pressures:     dict[str, float] = Field(default_factory=dict)
     flows:         dict[str, float] = Field(default_factory=dict)
+    current_price: float | None = None
+    pump_powers_kw:       dict[str, float] = Field(default_factory=dict)
+    pump_step_energy_kwh: dict[str, float] = Field(default_factory=dict)
+    pump_step_cost_eur:   dict[str, float | None] = Field(default_factory=dict)
+    total_power_kw:       float = 0.0
+    step_energy_kwh:      float = 0.0
+    step_cost_eur:        float | None = None
     last_step_at:  datetime | None = None
+    pattern_id:    str | None = None
+
+
+class PatternResponse(BaseModel):
+    pattern_id:    str | None
+    multipliers:   list[float]
+    step_minutes:  int
 
 
 class OverrideRequest(BaseModel):
@@ -62,7 +76,7 @@ class PredictRequest(BaseModel):
 
 
 class PredictResponse(BaseModel):
-    commands:    dict[str, str]            # pump_id -> "OPEN"|"CLOSED"
+    commands:    dict[str, str]            # pump_id -> "OPEN"|"CLOSED"|"NOP"
     model_id:    str
     explanation: dict | None = None
 

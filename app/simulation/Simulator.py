@@ -51,6 +51,8 @@ class EPANETSimulator:
         self._base_demands: list[float] | None = None
         self._sim_started: bool = False
         self._current_t_sec: float = 0.0
+        self._current_pattern_id: str | None = None
+        self._current_pattern_multipliers: list[float] | None = None
 
     # ------------------------------------------------------------------
     # Public interface
@@ -165,9 +167,24 @@ class EPANETSimulator:
         mu = -0.5 * sigma ** 2
         multipliers = np.random.lognormal(mean=mu, sigma=sigma, size=96).tolist()
         self._network.addPattern("DMA_AUTO", multipliers)
+        self._current_pattern_id = uuid.uuid4().hex[:12]
+        self._current_pattern_multipliers = [float(x) for x in multipliers]
 
         # Re-randomize the per-node base demands too.
         self._randomizeDemand()
+
+    @property
+    def current_pattern_id(self) -> str | None:
+        """ID of the most recently installed demand pattern (None until first rotate)."""
+        return self._current_pattern_id
+
+    def current_pattern_multipliers(self) -> list[float]:
+        """
+        Return the 96 multipliers of the currently installed demand pattern.
+        Returns an empty list before any rotate_demand_pattern() call (i.e.
+        before /sim/start). The first tick at step 0 will install one.
+        """
+        return list(self._current_pattern_multipliers or [])
 
     def read_state(self) -> StepState:
         """
@@ -278,13 +295,17 @@ class EPANETSimulator:
             "tanks":                tanks_info,
         }
 
-    def render_plot_svg(self) -> tuple[str, dict]:
+    def render_plot_svg(self, theme: str = "light") -> tuple[str, dict]:
         """
         Render the network via epyt as an SVG string and return it alongside a
         geometry map. The geometry contains each node's pixel position inside the
         SVG (post Y-flip) and each link's type + endpoint node IDs, so the client
         can hit-test nodes (point distance) and links (point-to-segment distance)
         without parsing the SVG.
+
+        theme: "light" or "dark". Dark renders with a transparent background and
+        light edge/text colors so the SVG sits cleanly inside a dark card. The
+        geometry returned is identical across themes (positions are unchanged).
 
         Returns (svg_str, geometry) where geometry has keys:
             svg_width, svg_height,
@@ -298,6 +319,8 @@ class EPANETSimulator:
         matplotlib.use("Agg", force=False)
         import matplotlib.pyplot as plt
 
+        is_dark = theme == "dark"
+
         fig = self._network.plot()
         if fig is None:
             fig = plt.gcf()
@@ -307,6 +330,25 @@ class EPANETSimulator:
         fig.set_dpi(72)
         fig.set_size_inches(12, 9)
         ax = fig.gca()
+
+        if is_dark:
+            # Transparent canvas; recolor axis frame, ticks, and text so the SVG
+            # sits cleanly inside a dark card.
+            fig.patch.set_alpha(0.0)
+            ax.set_facecolor("none")
+            for spine in ax.spines.values():
+                spine.set_edgecolor("#94a3b8")
+            ax.tick_params(colors="#cbd5e1")
+            for label in ax.get_xticklabels() + ax.get_yticklabels():
+                label.set_color("#cbd5e1")
+            ax.xaxis.label.set_color("#cbd5e1")
+            ax.yaxis.label.set_color("#cbd5e1")
+            if ax.title:
+                ax.title.set_color("#e2e8f0")
+            # epyt draws node labels as Text artists; recolor any default-dark text
+            for txt in ax.texts:
+                txt.set_color("#e2e8f0")
+
         fig.canvas.draw()
 
         n = self._network
@@ -363,7 +405,10 @@ class EPANETSimulator:
 
         buf = io.StringIO()
         # NO bbox_inches="tight" — would crop the SVG and shift the coords above.
-        fig.savefig(buf, format="svg")
+        fig.savefig(buf, format="svg",
+                    transparent=is_dark,
+                    facecolor=("none" if is_dark else "white"),
+                    edgecolor="none")
         plt.close(fig)
 
         geometry = {
@@ -378,10 +423,12 @@ class EPANETSimulator:
         """
         Apply pump status commands via setLinkStatus.
 
-        commands: {pump_id: "OPEN" | "CLOSED"}.
+        commands: {pump_id: "OPEN" | "CLOSED" | "NOP"}.
 
-        Pumps absent from commands are left untouched. Called AFTER override
-        resolution, BEFORE step().
+        "NOP" means defer to the network's own rule-based controls — no
+        setLinkStatus call is issued, so any [RULES] in the .inp remain in
+        effect for that pump. Pumps absent from commands are likewise
+        untouched. Called AFTER override resolution, BEFORE step().
         """
         if self._network is None or not self._sim_started:
             raise RuntimeError("Simulation not started.")
@@ -392,6 +439,8 @@ class EPANETSimulator:
         }
         for pump_id, status in commands.items():
             if pump_id not in pump_name_to_link_index:
+                continue
+            if status == "NOP":
                 continue
             link_index = pump_name_to_link_index[pump_id]
             value = 1 if status == "OPEN" else 0
@@ -425,6 +474,12 @@ class EPANETSimulator:
         velocities     = self._network.getLinkVelocity()
         headlosses     = self._network.getLinkHeadloss()
         pump_state_raw = self._network.getLinkPumpState()
+        # getLinkEnergy returns the avg power (kW) for each link over the just-
+        # computed hydraulic step; non-pump links are 0.
+        try:
+            link_energies = self._network.getLinkEnergy()
+        except Exception:
+            link_energies = None
 
         tank_levels: dict[str, float] = {}
         for tid in tank_ids:
@@ -432,6 +487,15 @@ class EPANETSimulator:
             if i is None:
                 continue
             tank_levels[tid] = float(heads[i]) - float(elevations[i])
+
+        link_id_to_idx = {lid: i for i, lid in enumerate(link_ids)}
+        pump_powers_kw: dict[str, float] = {}
+        for pid in pump_ids:
+            i = link_id_to_idx.get(pid)
+            if i is None or link_energies is None:
+                pump_powers_kw[pid] = 0.0
+            else:
+                pump_powers_kw[pid] = float(link_energies[i])
 
         result = StepResult(
             sim_time_sec=float(t_sec),
@@ -446,6 +510,7 @@ class EPANETSimulator:
                 for i, pid in enumerate(pump_ids)
             },
             tank_levels=tank_levels,
+            pump_powers_kw=pump_powers_kw,
         )
 
         tstep = self._network.nextHydraulicAnalysisStep()

@@ -41,3 +41,4 @@ class StepResult:
     headlosses:    dict[str, float] = field(default_factory=dict)
     pump_states:   dict[str, str]   = field(default_factory=dict)
     tank_levels:   dict[str, float] = field(default_factory=dict)
+    pump_powers_kw: dict[str, float] = field(default_factory=dict)  # pump_id -> avg kW over last step

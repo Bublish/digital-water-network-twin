@@ -8,7 +8,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
 from app.api.schemas import (
-    OverrideRequest, OverrideResponse,
+    OverrideRequest, OverrideResponse, PatternResponse,
     SimStartRequest, SimStartResponse, SimStopResponse, SimState,
 )
 from app.simulation.types import SimStatus
@@ -84,6 +84,17 @@ async def set_override(req: OverrideRequest, request: Request) -> OverrideRespon
 async def get_overrides(request: Request) -> OverrideResponse:
     runner = _runner(request)
     return OverrideResponse(pump_modes=runner.pump_modes)
+
+
+@router.get("/pattern", response_model=PatternResponse)
+async def get_pattern(request: Request) -> PatternResponse:
+    """Current 96-step demand multiplier pattern. Empty list before /sim/start."""
+    sim = _runner(request)._sim
+    return PatternResponse(
+        pattern_id=sim.current_pattern_id,
+        multipliers=sim.current_pattern_multipliers(),
+        step_minutes=15,
+    )
 
 
 @router.get("/stream")

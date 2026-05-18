@@ -101,16 +101,14 @@ async def test_api_failure_keeps_existing_cache(monkeypatch):
     await engine.refresh_if_needed(ANCHOR)
     cached_before = dict(engine._cache)
 
-    # Now force the next fetch to fail; cache must survive
+    # Now force the next fetch to fail; existing cache must survive
     http.get.side_effect = RuntimeError("network down")
     # Bypass the rate-limit guard so a fetch is attempted
     engine._last_fetch_monotonic = 0.0
-    engine._cache.clear()  # simulate empty cache so refresh actually fires
     await engine.refresh_if_needed(ANCHOR)
-    assert engine._cache == {}  # fetch failed, nothing added — but no crash
-    # And get_current_price gracefully returns flat rate
-    assert engine.get_current_price(ANCHOR) == pytest.approx(engine.flat_rate)
-    # Restore real shape to be sure cached_before was non-empty earlier
+    assert engine._cache == cached_before
+    # Cached price remains available despite the failed refresh
+    assert engine.get_current_price(ANCHOR) == pytest.approx(cached_before[int(ANCHOR.timestamp())])
     assert len(cached_before) == 20
 
 

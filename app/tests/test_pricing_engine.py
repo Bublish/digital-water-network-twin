@@ -113,6 +113,21 @@ async def test_api_failure_keeps_existing_cache(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_api_failure_with_empty_cache_still_respects_min_fetch_interval(monkeypatch):
+    monkeypatch.setenv("PRICING_ENABLED", "true")
+    http = MagicMock()
+    http.get = AsyncMock(side_effect=RuntimeError("network down"))
+    engine = PricingEngine(http_client=http)
+    engine.set_anchor(ANCHOR)
+
+    with patch("app.pricing.PricingEngine.time.monotonic", side_effect=[1000.0, 1000.0, 1001.0]):
+        await engine.refresh_if_needed(ANCHOR)
+        await engine.refresh_if_needed(ANCHOR)
+
+    assert http.get.call_count == 1
+
+
+@pytest.mark.asyncio
 async def test_refresh_skipped_while_cache_has_enough_runway(monkeypatch):
     monkeypatch.setenv("PRICING_ENABLED", "true")
     http = MagicMock()

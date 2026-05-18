@@ -129,7 +129,7 @@ class PricingEngine:
         now_mono = time.monotonic()
         if now_mono < self._future_backoff_until:
             return
-        if now_mono - self._last_fetch_monotonic < MIN_FETCH_INTERVAL_SEC and self._cache:
+        if now_mono - self._last_fetch_monotonic < MIN_FETCH_INTERVAL_SEC:
             return
 
         slot = _floor_to_slot(sim_dt)

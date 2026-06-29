@@ -498,3 +498,27 @@ main {
 .uplot .u-axis { color: var(--text-muted); }
 .uplot .u-cursor-x,
 .uplot .u-cursor-y { display: none; }
+
+/* ============================================================
+   Prediction Engine page
+   ============================================================ */
+.pred-status { min-height: 1.2em; margin: 0.25rem 0 0.75rem; color: var(--muted, #64748b); }
+.pred-controls { display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.5rem; }
+.pred-controls select { padding: 0.3rem 0.5rem; }
+.pred-metrics { color: var(--muted, #64748b); font-size: 0.9rem; }
+.pred-legend { display: flex; flex-wrap: wrap; gap: 1rem; font-size: 0.85rem; margin: 0.25rem 0 0.5rem; }
+.pred-legend .lg::before { content: ""; display: inline-block; width: 0.8em; height: 0.8em;
+  margin-right: 0.35em; border-radius: 2px; vertical-align: baseline; }
+.lg-seed::before { background: rgba(2,132,199,0.5); }
+.lg-live::before { background: rgba(22,163,74,0.5); }
+.lg-forecast::before { background: rgba(147,51,234,0.5); }
+.lg-fit::before { background: repeating-linear-gradient(90deg,#0284c7 0 4px,transparent 4px 7px); }
+.pred-chart { width: 100%; }
+
+.shap-bars { display: flex; flex-direction: column; gap: 0.35rem; }
+.shap-row { display: grid; grid-template-columns: 9.5rem 1fr; align-items: center; gap: 0.5rem; }
+.shap-name { font-size: 0.8rem; font-family: ui-monospace, monospace; color: var(--text, #334155);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.shap-track { background: rgba(148,163,184,0.18); border-radius: 3px; height: 0.9rem; }
+.shap-bar { display: block; height: 100%; border-radius: 3px; background: #0284c7; }
+[data-theme="dark"] .shap-bar { background: #38bdf8; }

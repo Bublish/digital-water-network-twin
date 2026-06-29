@@ -4,6 +4,7 @@ FastAPI app factory.
 Run from the repo root:
     uvicorn app.api.main:app --reload
 """
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -15,10 +16,13 @@ from fastapi.templating import Jinja2Templates
 
 from app.api.ml_routes import router as ml_router
 from app.api.network_routes import router as network_router
+from app.api.prediction_routes import router as prediction_router
 from app.api.pricing_routes import router as pricing_router
 from app.api.sim_routes import router as sim_router
 from app.api.web_routes import router as web_router
 from app.db.SupabaseClient import SupabaseDB
+from app.ml.PredictionService import PredictionService
+from app.ml.PressurePredictor import PressurePredictor
 from app.pricing.PricingEngine import PricingEngine
 from app.scheduler.SimulationRunner import SimulationRunner
 from app.simulation.Simulator import EPANETSimulator
@@ -46,6 +50,20 @@ async def lifespan(app: FastAPI):
         ml_url="http://localhost:8000/ml/predict",
     )
     app.state.network_info = sim.compute_network_info()
+
+    def _seeder() -> None:
+        # Dedicated short-lived simulator so the live sim's state is untouched.
+        with EPANETSimulator() as seed_sim:
+            seed_sim.seed(days=4, step_sec=900)
+
+    app.state.predictor = PredictionService(
+        db=db,
+        predictor=PressurePredictor(),
+        static_features=sim.compute_junction_features(),
+        seeder=_seeder,
+    )
+    training_task = asyncio.create_task(app.state.predictor.train_in_background())
+
     svg_light, geometry = sim.render_plot_svg(theme="light")
     svg_dark,  _        = sim.render_plot_svg(theme="dark")
     app.state.network_plot_svg_light = svg_light
@@ -58,6 +76,11 @@ async def lifespan(app: FastAPI):
     finally:
         if app.state.runner.status == SimStatus.RUNNING:
             await app.state.runner.stop()
+        training_task.cancel()
+        try:
+            await training_task
+        except (asyncio.CancelledError, Exception):  # noqa: BLE001
+            pass
         await http_client.aclose()
         sim.close()
         # ============================================================
@@ -77,6 +100,7 @@ app.include_router(sim_router)
 app.include_router(ml_router)
 app.include_router(network_router)
 app.include_router(pricing_router)
+app.include_router(prediction_router)
 app.include_router(web_router)
 
 

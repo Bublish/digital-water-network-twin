@@ -37,15 +37,8 @@ async def overview(request: Request) -> HTMLResponse:
     )
 
 
-@router.get("/pump-control", response_class=HTMLResponse)
-async def pump_control(request: Request) -> HTMLResponse:
+@router.get("/prediction", response_class=HTMLResponse)
+async def prediction(request: Request) -> HTMLResponse:
     return request.app.state.templates.TemplateResponse(
-        request, "pump_control.html", {"active": "pump"},
-    )
-
-
-@router.get("/xai", response_class=HTMLResponse)
-async def xai(request: Request) -> HTMLResponse:
-    return request.app.state.templates.TemplateResponse(
-        request, "xai.html", {"active": "xai"},
+        request, "prediction.html", {"active": "prediction"},
     )

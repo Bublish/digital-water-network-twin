@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Prediction Engine — WSN1 SCADA{% endblock %}
+{% block content %}
+  <section class="card">
+    <h2>Prediction Engine</h2>
+    <div id="pred-status" class="pred-status" role="status">Loading…</div>
+    <div class="pred-controls">
+      <label for="pred-node">Junction</label>
+      <select id="pred-node" disabled></select>
+      <span id="pred-metrics" class="pred-metrics"></span>
+    </div>
+    <div class="pred-legend">
+      <span class="lg lg-seed">Seed (training)</span>
+      <span class="lg lg-live">Live</span>
+      <span class="lg lg-forecast">Forecast</span>
+      <span class="lg lg-fit">Model fit / forecast (dashed)</span>
+    </div>
+    <div id="pred-chart" class="pred-chart"></div>
+  </section>
+  <section class="card">
+    <h3>SHAP feature importance <small id="shap-node-label"></small></h3>
+    <div id="shap-bars" class="shap-bars"></div>
+  </section>
+{% endblock %}
+{% block scripts %}
+  <script src="/static/js/prediction.js?v=1"></script>
+{% endblock %}

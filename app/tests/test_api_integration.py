@@ -288,18 +288,15 @@ def test_reset_when_not_running_starts_fresh(test_app):
 
 
 def test_web_pages_render(test_app):
-    """All three nav pages should render with 200 + the nav links present."""
+    """Overview + Prediction Engine render; old routes are gone."""
     with TestClient(test_app) as client:
-        for path, expected_text in [
-            ("/",             "Overview"),
-            ("/pump-control", "Pump Control"),
-            ("/xai",          "XAI"),
-        ]:
+        for path, expected_text in [("/", "Overview"), ("/prediction", "Prediction Engine")]:
             r = client.get(path)
             assert r.status_code == 200, f"{path} -> {r.status_code}"
             html = r.text
-            # Nav must be present on every page
             assert 'href="/"' in html
-            assert 'href="/pump-control"' in html
-            assert 'href="/xai"' in html
+            assert 'href="/prediction"' in html
             assert expected_text in html
+        # Old pages removed
+        assert client.get("/pump-control").status_code == 404
+        assert client.get("/xai").status_code == 404

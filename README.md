@@ -20,7 +20,6 @@ network from the *Battle of the Water Networks* (Ostfeld, 2021): 126 junctions,
 ## Table of Contents
 
 - [What It Does](#what-it-does)
-- [Screenshots](#screenshots)
 - [Features](#features)
 - [Architecture](#architecture)
 - [How It Works](#how-it-works)
@@ -54,28 +53,6 @@ concerns run in parallel:
 
 Everything is presented through a server-rendered web UI that updates live over
 Server-Sent Events — no page reloads, no client framework.
-
----
-
-## Screenshots
-
-### Overview
-
-Live network diagram, simulation control, EPEX electricity price, demand pattern,
-and tank/pump status — all updating over SSE.
-
-![Overview dashboard](assets/overview.png)
-
-Per-step energy and cost, alongside static network statistics:
-
-![Energy and network info](assets/energy-network-info.png)
-
-### Prediction Engine
-
-Per-node pressure (seed / live / forecast) with the model-fit overlay and SHAP
-feature attributions:
-
-![Prediction Engine](assets/prediction-engine.png)
 
 ---
 

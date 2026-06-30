@@ -40,5 +40,5 @@ Thumbs.db
 # Plans
 docs
 
-# Claude Code local worktrees
-.claude/worktrees/
+# Claude Code local config & worktrees
+.claude/

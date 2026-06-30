@@ -53,6 +53,11 @@ class EPANETSimulator:
         self._current_t_sec: float = 0.0
         self._current_pattern_id: str | None = None
         self._current_pattern_multipliers: list[float] | None = None
+        # The network's real demand pattern, captured pristine at load() so
+        # per-cycle lognormal noise is always applied to the original (no drift).
+        self._pattern0_index: int | None = None
+        self._base_pattern: list[float] | None = None
+        self._pattern_rotations: int = 0
 
     # ------------------------------------------------------------------
     # Public interface
@@ -64,12 +69,18 @@ class EPANETSimulator:
             self._network = epanet(str(self._inp_path), loadfile=True)
             raw = self._network.getNodeBaseDemands()   # {1: [d0, d1, ..., dN]}
             self._base_demands = list(raw[1])          # category 1; defensive copy
+            # Capture the network's measured demand pattern (PATTERN-0) before
+            # any rotation overwrites it. Junction demands reference this pattern.
+            self._pattern0_index = int(self._network.getPatternIndex("PATTERN-0"))
+            self._base_pattern = [
+                float(x) for x in self._network.getPattern()[self._pattern0_index - 1]
+            ]
             print("Network loaded successfully.")
         except Exception as exc:
             raise RuntimeError(f"Failed to load network: {exc}") from exc
         return self
 
-    def seed(self, days: int = 4) -> str:
+    def seed(self, days: int = 4, step_sec: int = 900) -> str:
         """
         Run a full EPS for `days` days as fast as EPANET can compute.
         Inserts one batch of node + link rows per simulated hour.
@@ -81,7 +92,7 @@ class EPANETSimulator:
 
         # Order matters: EPANET clamps hydraulic step to ≤ pattern step,
         # so set pattern step first. Reporting step controls getComputedHydraulicTimeSeries sampling.
-        hstep = 3600  # 1 hour in seconds
+        hstep = step_sec
         self._network.setTimePatternStep(hstep)
         self._network.setTimeHydraulicStep(hstep)
         self._network.setTimeReportingStep(hstep)
@@ -151,22 +162,37 @@ class EPANETSimulator:
 
     def rotate_demand_pattern(self) -> None:
         """
-        Install a fresh 96-step demand multiplier pattern and re-randomize
+        Re-randomize the network's real demand pattern (PATTERN-0) and the
         per-node base demands. Called by the scheduler at start AND every
         96 steps (every simulated 24h).
 
-        The pattern multipliers are lognormal around 1.0 with sigma=0.10,
-        which is a system-wide diurnal jitter applied on top of the
-        per-node lognormal base-demand randomization.
+        Every call — including the first — multiplies each of the 96 steps of
+        the *original* PATTERN-0 by an independent lognormal factor (sigma=0.10,
+        mean 1.0): daily demand keeps the real diurnal shape but varies day to
+        day, and the live run never replays the raw measured pattern (that
+        deterministic pattern is reserved for the seed/training data). Noise is
+        always applied to the pristine original captured at load(), so it does
+        not accumulate.
+
+        PATTERN-0 is overwritten in place; junction demands already reference
+        it, so the simulation runs on the new values without reassigning nodes.
         """
         if self._network is None:
             raise RuntimeError("Network not loaded.")
+        if self._base_pattern is None or self._pattern0_index is None:
+            raise RuntimeError("rotate_demand_pattern called before load().")
 
-        # 96 steps × 15 min = 24 h
+        # Always run on a slightly-randomised PATTERN-0 from the first cycle, so
+        # the live simulation never replays the raw measured pattern (the seed
+        # data is the deterministic raw-PATTERN-0 training base instead). Noise
+        # is applied to the pristine original captured at load() (no drift).
         sigma = 0.10
         mu = -0.5 * sigma ** 2
-        multipliers = np.random.lognormal(mean=mu, sigma=sigma, size=96).tolist()
-        self._network.addPattern("DMA_AUTO", multipliers)
+        noise = np.random.lognormal(mean=mu, sigma=sigma, size=len(self._base_pattern))
+        multipliers = [float(base * n) for base, n in zip(self._base_pattern, noise)]
+
+        self._network.setPattern(self._pattern0_index, multipliers)
+        self._pattern_rotations += 1
         self._current_pattern_id = uuid.uuid4().hex[:12]
         self._current_pattern_multipliers = [float(x) for x in multipliers]
 
@@ -294,6 +320,22 @@ class EPANETSimulator:
             "pattern_period_min":   pattern_step_sec // 60,
             "tanks":                tanks_info,
         }
+
+    def compute_junction_features(self) -> dict[str, dict]:
+        """Static per-junction model features: {jid: {"elev", "base_demand"}}.
+        Base demand is the nominal .inp category-1 value (matches training)."""
+        if self._network is None:
+            raise RuntimeError("Network not loaded. Call load() first.")
+        n = self._network
+        node_ids = list(n.getNodeNameID())
+        junction_ids = set(n.getNodeJunctionNameID())
+        elevations = n.getNodeElevations()
+        base = list(n.getNodeBaseDemands()[1])
+        out: dict[str, dict] = {}
+        for i, nid in enumerate(node_ids):
+            if nid in junction_ids:
+                out[str(nid)] = {"elev": float(elevations[i]), "base_demand": float(base[i])}
+        return out
 
     def render_plot_svg(self, theme: str = "light") -> tuple[str, dict]:
         """

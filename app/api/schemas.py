@@ -100,3 +100,53 @@ class NetworkInfo(BaseModel):
     pattern_steps:         int
     pattern_period_min:    int
     tanks:                 dict[str, TankInfo] = {}
+
+
+class PredictionStatus(BaseModel):
+    state:        str
+    model_id:     str | None = None
+    n_train_rows: int = 0
+    trained_at:   datetime | None = None
+    error:        str | None = None
+
+
+class NodeListResponse(BaseModel):
+    nodes: list[str]
+
+
+class SeriesPoint(BaseModel):
+    hr: float
+    p:  float
+
+
+class NodeRegions(BaseModel):
+    seed_end:     float
+    live_end:     float
+    forecast_end: float
+
+
+class NodeMetrics(BaseModel):
+    live_rmse: float | None = None
+    live_r2:   float | None = None
+
+
+class NodePrediction(BaseModel):
+    node_id:  str
+    seed:     list[SeriesPoint]
+    live:     list[SeriesPoint]
+    overlay:  list[SeriesPoint]
+    forecast: list[SeriesPoint]
+    regions:  NodeRegions
+    metrics:  NodeMetrics
+    note:     str | None = None
+
+
+class ShapFeature(BaseModel):
+    name:          str
+    mean_abs_shap: float
+
+
+class ShapResponse(BaseModel):
+    node_id:  str
+    features: list[ShapFeature]
+    top_n:    int = 15

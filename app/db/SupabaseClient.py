@@ -88,6 +88,57 @@ class SupabaseDB:
         self._client.table("control_decisions").insert(rows).execute()
 
     # ------------------------------------------------------------------
+    # Result reads (prediction engine)
+    # ------------------------------------------------------------------
+
+    def seed_node_results_empty(self) -> bool:
+        res = self._client.table("seed_node_results").select("node_id").limit(1).execute()
+        return len(res.data) == 0
+
+    def seed_node_results_step_hours(self) -> float | None:
+        """Smallest positive gap between consecutive sim_hours for one node,
+        used to verify the seed table is at 15-min (0.25 h) resolution."""
+        head = self._client.table("seed_node_results").select("node_id").limit(1).execute()
+        if not head.data:
+            return None
+        node_id = head.data[0]["node_id"]
+        res = (self._client.table("seed_node_results")
+               .select("sim_hour").eq("node_id", node_id)
+               .order("sim_hour").limit(5).execute())
+        hours = sorted({float(r["sim_hour"]) for r in res.data})
+        gaps = [b - a for a, b in zip(hours, hours[1:]) if b - a > 0]
+        return min(gaps) if gaps else None
+
+    def fetch_seed_node_results(self, page_size: int = 1000) -> list[dict]:
+        """All seed node rows, paginated (Supabase caps a single response)."""
+        rows: list[dict] = []
+        page = 0
+        while True:
+            res = (self._client.table("seed_node_results")
+                   .select("node_id, sim_hour, pressure_psi, head_ft, demand_gpm")
+                   .order("node_id").order("sim_hour")
+                   .range(page * page_size, page * page_size + page_size - 1).execute())
+            batch = res.data
+            rows.extend(batch)
+            if len(batch) < page_size:
+                break
+            page += 1
+        return rows
+
+    def fetch_seed_node_series(self, node_id: str) -> list[dict]:
+        res = (self._client.table("seed_node_results")
+               .select("sim_hour, pressure_psi, head_ft, demand_gpm")
+               .eq("node_id", node_id).order("sim_hour").execute())
+        return res.data
+
+    def fetch_live_node_series(self, node_id: str, run_id: str) -> list[dict]:
+        res = (self._client.table("live_node_results")
+               .select("sim_hour, pressure_psi, head_ft, demand_gpm")
+               .eq("node_id", node_id).eq("run_id", run_id)
+               .order("sim_hour").execute())
+        return res.data
+
+    # ------------------------------------------------------------------
     # DEBUG ONLY: live-table cleanup
     # ------------------------------------------------------------------
 

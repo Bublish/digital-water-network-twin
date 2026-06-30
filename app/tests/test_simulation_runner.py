@@ -115,6 +115,32 @@ async def test_tick_calls_ml_applies_override_persists(mock_sim, mock_db):
 
 
 @pytest.mark.asyncio
+async def test_tick_stops_simulator_at_end_of_duration(mock_sim, mock_db):
+    """When EPANET reports end-of-duration, the runner must close the sim, not
+    just flip status. Otherwise the epyt sim stays 'started' and the next
+    /sim/start raises RuntimeError('Simulation already started') -> 500."""
+    from app.scheduler.SimulationRunner import SimulationRunner
+    from app.simulation.types import PumpMode, SimStatus
+
+    http = AsyncMock()
+    http.post.return_value = MagicMock(
+        json=lambda: {"commands": {"P1": "NOP"}, "model_id": "stub-v0"},
+        raise_for_status=lambda: None,
+    )
+    mock_sim.step.side_effect = StopIteration("end of duration")
+
+    runner = SimulationRunner(sim=mock_sim, db=mock_db, http_client=http)
+    runner._pump_modes = {"P1": PumpMode.AUTO}
+    runner._sim_id = "test-sim"
+    runner._status = SimStatus.RUNNING
+
+    await runner.tick()
+
+    assert runner.status == SimStatus.STOPPED
+    mock_sim.stop_simulation.assert_called_once()
+
+
+@pytest.mark.asyncio
 async def test_tick_falls_back_when_ml_fails(mock_sim, mock_db):
     from app.scheduler.SimulationRunner import SimulationRunner
     from app.simulation.types import PumpMode, SimStatus

@@ -212,6 +212,9 @@ class SimulationRunner:
                 self._hydraulic_failures = 0
             except StopIteration:
                 logger.error("EPANET reached end of simulation duration.")
+                # Close the hydraulic analysis so the underlying sim isn't left
+                # "started"; otherwise the next /sim/start raises and 500s.
+                self._sim.stop_simulation()
                 self._status = SimStatus.STOPPED
                 self._broadcast_status()
                 return
@@ -220,6 +223,7 @@ class SimulationRunner:
                 logger.exception(f"Hydraulic solve failed "
                                  f"(failure #{self._hydraulic_failures}/{HYDRAULIC_RETRY_LIMIT})")
                 if self._hydraulic_failures >= HYDRAULIC_RETRY_LIMIT:
+                    self._sim.stop_simulation()
                     self._status = SimStatus.STOPPED
                     self._broadcast_status()
                 return

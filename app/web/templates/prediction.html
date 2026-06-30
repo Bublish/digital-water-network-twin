@@ -7,6 +7,7 @@
     <div class="pred-controls">
       <label for="pred-node">Junction</label>
       <select id="pred-node" disabled></select>
+      <label class="pred-live"><input type="checkbox" id="pred-live" checked> Live</label>
       <span id="pred-metrics" class="pred-metrics"></span>
     </div>
     <div class="pred-legend">
@@ -23,5 +24,5 @@
   </section>
 {% endblock %}
 {% block scripts %}
-  <script src="/static/js/prediction.js?v=1"></script>
+  <script src="/static/js/prediction.js?v=2"></script>
 {% endblock %}

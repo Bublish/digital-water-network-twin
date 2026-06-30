@@ -52,9 +52,22 @@ async def lifespan(app: FastAPI):
     app.state.network_info = sim.compute_network_info()
 
     def _seeder() -> None:
-        # Dedicated short-lived simulator so the live sim's state is untouched.
-        with EPANETSimulator() as seed_sim:
-            seed_sim.seed(days=4, step_sec=900)
+        # epyt/EPANET keeps ONE global project per process (ph=False, which is
+        # required — ph=True breaks the hydraulic stepping interface in epyt
+        # 2.3.5). A second in-process EPANETSimulator therefore clobbers the live
+        # sim's network and, on close, frees it. Run the seed in its own process
+        # so it gets an independent EPANET project and cannot touch the live sim.
+        import multiprocessing as mp
+
+        from app.simulation.seed_worker import run_seed
+
+        proc = mp.get_context("spawn").Process(
+            target=run_seed, args=(4, 900), name="epanet-seed",
+        )
+        proc.start()
+        proc.join()
+        if proc.exitcode != 0:
+            raise RuntimeError(f"Seed subprocess failed (exitcode={proc.exitcode})")
 
     app.state.predictor = PredictionService(
         db=db,

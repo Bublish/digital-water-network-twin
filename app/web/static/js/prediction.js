@@ -8,9 +8,17 @@
   const chartEl = document.getElementById("pred-chart");
   const shapEl = document.getElementById("shap-bars");
   const shapLabel = document.getElementById("shap-node-label");
+  const liveEl = document.getElementById("pred-live");
 
   let chart = null;
   let lastRegions = null;
+
+  // Live-refresh throttle/coalesce state (chart only; SHAP refreshes on node change).
+  const MIN_REFRESH_MS = 3000;
+  let lastRefreshAt = 0;
+  let refreshInFlight = false;
+  let pendingRefresh = false;
+  let refreshTimer = null;
 
   function themeColors() {
     const dark = document.documentElement.getAttribute("data-theme") === "dark";
@@ -140,6 +148,60 @@
     }
   }
 
+  function liveEnabled() {
+    return liveEl ? liveEl.checked : true;
+  }
+
+  // Called once per simulation step (via SSE). Coalesces bursts into at most one
+  // chart refresh per MIN_REFRESH_MS — with a trailing refresh so the chart ends
+  // on fresh data — and never more than one request in flight. SHAP is not
+  // refreshed here (it changes little step-to-step and is comparatively heavy).
+  function onSimStep() {
+    if (!liveEnabled()) return;
+    pendingRefresh = true;
+    maybeRefresh();
+  }
+
+  function maybeRefresh() {
+    if (refreshInFlight || !pendingRefresh || !liveEnabled()) return;
+    if (document.hidden) return;            // resume via visibilitychange
+    const nodeId = selectEl.value;
+    if (!nodeId) return;
+
+    const wait = MIN_REFRESH_MS - (Date.now() - lastRefreshAt);
+    if (wait > 0) {
+      if (refreshTimer === null) {
+        refreshTimer = setTimeout(() => { refreshTimer = null; maybeRefresh(); }, wait);
+      }
+      return;
+    }
+
+    pendingRefresh = false;
+    refreshInFlight = true;
+    lastRefreshAt = Date.now();
+    fetch(`/prediction/node/${encodeURIComponent(nodeId)}`)
+      .then((r) => { if (!r.ok) throw new Error(r.status); return r.json(); })
+      .then((pred) => { renderChart(pred); })
+      .catch(() => { /* keep last good chart on transient errors */ })
+      .finally(() => {
+        refreshInFlight = false;
+        if (pendingRefresh) maybeRefresh();
+      });
+  }
+
+  function startLiveUpdates() {
+    const es = new EventSource("/sim/stream");
+    es.onmessage = () => onSimStep();
+    es.onerror = () => { /* EventSource auto-reconnects */ };
+
+    document.addEventListener("visibilitychange", () => {
+      if (!document.hidden) { pendingRefresh = true; maybeRefresh(); }
+    });
+    if (liveEl) liveEl.addEventListener("change", () => {
+      if (liveEnabled()) { pendingRefresh = true; maybeRefresh(); }
+    });
+  }
+
   async function populateNodes() {
     const { nodes } = await fetch("/prediction/nodes").then((r) => r.json());
     selectEl.innerHTML = "";
@@ -175,6 +237,9 @@
 
   (async function init() {
     const ready = await pollUntilReady();
-    if (ready) await populateNodes();
+    if (ready) {
+      await populateNodes();
+      startLiveUpdates();
+    }
   })();
 })();
